@@ -3,6 +3,7 @@
 import { mapConfig } from '../map/map-config.js';
 import { createMapView } from '../map/map-view.js';
 import { createUserLocationLayer } from '../overlays/user-location-layer.js';
+import { createTimeOverlay } from '../overlays/time-overlay.js';
 import { startGeolocation } from '../services/geolocation.js';
 import { state } from './state.js';
 
@@ -13,6 +14,7 @@ export function bootstrapApp() {
   state.map = mapView.map;
 
   const userLocationLayer = createUserLocationLayer(mapView.map);
+  const timeOverlay = createTimeOverlay(mapView.map);
 
   const stopGeolocation = startGeolocation({
     onUpdate: (location) => {
@@ -31,6 +33,7 @@ export function bootstrapApp() {
   return function teardown() {
     stopGeolocation();
     userLocationLayer.remove();
+    timeOverlay.remove();
     mapView.map.remove();
   };
 }
