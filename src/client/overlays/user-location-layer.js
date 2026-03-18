@@ -1,25 +1,47 @@
-// Overlay for user's geolocation (red dot).
+// Overlay position joueur — cercle pulsant sur la carte Leaflet.
 
-export function createUserLocationLayer() {
-  let location = null;
+import L from 'leaflet';
 
-  function setLocation(nextLocation) {
-    location = nextLocation;
+export function createUserLocationLayer(map) {
+  let marker = null;
+  let accuracyCircle = null;
+
+  function setLocation({ lat, lon, accuracy }) {
+    const latlng = L.latLng(lat, lon);
+
+    if (!marker) {
+      // Cercle principal : position du joueur
+      marker = L.circleMarker(latlng, {
+        radius: 8,
+        fillColor: '#e11d48',
+        color: '#ffffff',
+        weight: 2,
+        opacity: 1,
+        fillOpacity: 0.95
+      }).addTo(map);
+
+      // Cercle de précision GPS (zone floue autour du joueur)
+      accuracyCircle = L.circle(latlng, {
+        radius: accuracy || 20,
+        fillColor: '#e11d48',
+        color: '#e11d48',
+        weight: 1,
+        opacity: 0.3,
+        fillOpacity: 0.1
+      }).addTo(map);
+    } else {
+      marker.setLatLng(latlng);
+      accuracyCircle.setLatLng(latlng);
+      if (accuracy) accuracyCircle.setRadius(accuracy);
+    }
   }
 
-  function render(ctx, mapView) {
-    if (!location || !mapView) return;
-    const screen = mapView.geoToScreen(location.lat, location.lon);
-    if (!screen) return;
-
-    ctx.fillStyle = "#e11d48";
-    ctx.beginPath();
-    ctx.arc(screen.x, screen.y, 6, 0, Math.PI * 2);
-    ctx.fill();
+  function remove() {
+    marker?.remove();
+    accuracyCircle?.remove();
+    marker = null;
+    accuracyCircle = null;
   }
 
-  return {
-    setLocation,
-    render
-  };
+  return { setLocation, remove };
 }

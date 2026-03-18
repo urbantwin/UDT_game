@@ -1,53 +1,36 @@
-// App bootstrap: wire map and geolocation together.
+// Initialisation de l'application — câblage Leaflet + géolocalisation + state.
 
-import { mapConfig } from "../map/map-config.js";
-import { createMapView } from "../map/map-view.js";
-import { createUserLocationLayer } from "../overlays/user-location-layer.js";
-import { startGeolocation } from "../services/geolocation.js";
-import { createRenderer } from "../render/renderer.js";
+import { mapConfig } from '../map/map-config.js';
+import { createMapView } from '../map/map-view.js';
+import { createUserLocationLayer } from '../overlays/user-location-layer.js';
+import { startGeolocation } from '../services/geolocation.js';
+import { state } from './state.js';
 
 export function bootstrapApp() {
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
+  const mapView = createMapView({ containerId: 'map', config: mapConfig });
 
-  document.body.style.margin = "0";
-  document.body.style.background = "#111";
-  document.body.style.overflow = "hidden";
-  canvas.style.display = "block";
-  document.body.appendChild(canvas);
+  // Expose l'instance Leaflet dans le state global
+  state.map = mapView.map;
 
-  const mapView = createMapView({
-    imageUrl: mapConfig.imageUrl,
-    bounds: mapConfig.bounds,
-    fit: mapConfig.fit
-  });
-
-  function resize() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    mapView.resize(canvas);
-  }
-  window.addEventListener("resize", resize);
-
-  const userLocationLayer = createUserLocationLayer();
-  const renderer = createRenderer({
-    canvas,
-    ctx,
-    mapView,
-    overlays: [userLocationLayer]
-  });
+  const userLocationLayer = createUserLocationLayer(mapView.map);
 
   const stopGeolocation = startGeolocation({
-    onUpdate: (location) => userLocationLayer.setLocation(location),
-    onError: (error) => console.warn("Geolocation error:", error)
-  });
+    onUpdate: (location) => {
+      state.userLocation = location;
+      userLocationLayer.setLocation(location);
 
-  resize();
-  renderer.start();
+      // Premier fix GPS : recentre la carte sur le joueur
+      if (!state.initialPositionSet) {
+        mapView.panTo(location.lat, location.lon);
+        state.initialPositionSet = true;
+      }
+    },
+    onError: (error) => console.warn('Geolocation error:', error)
+  });
 
   return function teardown() {
     stopGeolocation();
-    renderer.stop();
-    window.removeEventListener("resize", resize);
+    userLocationLayer.remove();
+    mapView.map.remove();
   };
 }

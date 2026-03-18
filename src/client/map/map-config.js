@@ -1,16 +1,23 @@
-// Map configuration.
-// This first version uses a single georeferenced PNG for the map background.
-// Keep this config isolated so we can swap to tiles or another renderer later.
+// Configuration de la carte — campus EPFL.
+// Utilise les tuiles OpenStreetMap (gratuites, aucune clé API requise).
 
 export const mapConfig = {
-  // TODO: Replace these bounds with the real georeference for EPFL_map.png.
-  // These values are placeholders to keep the pipeline wired end-to-end.
-  bounds: {
-    minLat: 46.516,
-    maxLat: 46.525,
-    minLon: 6.558,
-    maxLon: 6.574
-  },
-  imageUrl: new URL("../../../assets/images/EPFL_map.png", import.meta.url).href,
-  fit: "contain" // "contain" keeps the full map visible.
+  // Centre du campus EPFL (Rolex Learning Center)
+  center: { lat: 46.5191, lon: 6.5668 },
+
+  // Zoom initial : 17 = vue campus complet, 19 = détail bâtiment
+  initialZoom: 17,
+  minZoom: 14,   // En dessous : trop dézoomé, sort du campus
+  maxZoom: 19,   // Maximum supporté par OSM standard
+
+  // Tuiles OpenStreetMap (licence ODbL)
+  tileUrl: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+
+  // Limite de panoramique : empêche de sortir de la zone EPFL/Ecublens
+  maxBounds: [
+    [46.508, 6.545], // Sud-Ouest
+    [46.530, 6.590]  // Nord-Est
+  ],
+  maxBoundsViscosity: 0.9  // 1 = frontière rigide, 0 = libre
 };

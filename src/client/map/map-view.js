@@ -1,59 +1,46 @@
-// Map view: handles rendering the georeferenced map background.
-// This first version draws a single PNG image.
+// Carte interactive Leaflet + tuiles OpenStreetMap.
+// Remplace l'ancienne approche Canvas PNG statique.
 
-import { geoToMapPixels } from "./map-geo.js";
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
-export function createMapView({ imageUrl, bounds, fit = "contain" }) {
-  const image = new Image();
-  let ready = false;
-  let drawRect = { x: 0, y: 0, width: 0, height: 0, scale: 1 };
+export function createMapView({ containerId, config }) {
+  const map = L.map(containerId, {
+    center: [config.center.lat, config.center.lon],
+    zoom: config.initialZoom,
+    minZoom: config.minZoom,
+    maxZoom: config.maxZoom,
+    maxBounds: config.maxBounds,
+    maxBoundsViscosity: config.maxBoundsViscosity,
+    // Désactive les contrôles par défaut — on les remettra custom plus tard
+    zoomControl: true,
+    attributionControl: true
+  });
 
-  image.onload = () => {
-    ready = true;
-  };
-  image.src = imageUrl;
+  L.tileLayer(config.tileUrl, {
+    attribution: config.attribution,
+    maxZoom: config.maxZoom
+  }).addTo(map);
 
-  function computeDrawRect(canvas) {
-    if (!ready || !canvas) return;
-    const scaleX = canvas.width / image.width;
-    const scaleY = canvas.height / image.height;
-    const scale = fit === "cover" ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
-    const width = image.width * scale;
-    const height = image.height * scale;
-    const x = (canvas.width - width) * 0.5;
-    const y = (canvas.height - height) * 0.5;
-    drawRect = { x, y, width, height, scale };
-  }
-
-  function resize(canvas) {
-    computeDrawRect(canvas);
-  }
-
-  function render(ctx, canvas) {
-    if (!canvas || !ctx) return;
-    if (!ready) {
-      ctx.fillStyle = "#111";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      return;
-    }
-    computeDrawRect(canvas);
-    ctx.drawImage(image, drawRect.x, drawRect.y, drawRect.width, drawRect.height);
-  }
-
+  // Convertit des coordonnées géo en pixels écran (utile pour les overlays Canvas futurs)
   function geoToScreen(lat, lon) {
-    if (!ready) return null;
-    const mapPixels = geoToMapPixels(lat, lon, bounds, image.width, image.height);
-    if (!mapPixels) return null;
-    return {
-      x: drawRect.x + mapPixels.x * drawRect.scale,
-      y: drawRect.y + mapPixels.y * drawRect.scale
-    };
+    const point = map.latLngToContainerPoint(L.latLng(lat, lon));
+    return { x: point.x, y: point.y };
+  }
+
+  // Recentre la carte sur une position
+  function panTo(lat, lon, zoom) {
+    if (zoom !== undefined) {
+      map.setView([lat, lon], zoom);
+    } else {
+      map.panTo([lat, lon]);
+    }
   }
 
   return {
-    resize,
-    render,
+    map,          // instance Leaflet brute (pour ajouter des layers/markers directement)
     geoToScreen,
-    isReady: () => ready
+    panTo,
+    isReady: () => true
   };
 }
