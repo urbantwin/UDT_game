@@ -1,7 +1,8 @@
 // Leaflet overlay that displays the current time (hh:mm:ss).
-// Keeps time UI separate so it can be replaced with a richer HUD later.
 
 import L from 'leaflet';
+
+const NOTIFS_KEY = 'udt-notifs-enabled';
 
 function formatTime(date) {
   return date.toLocaleTimeString('en-GB', { hour12: false });
@@ -14,13 +15,31 @@ function formatCountdown(seconds) {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
+function makeButton(text, bg) {
+  const btn = L.DomUtil.create('button');
+  btn.type = 'button';
+  btn.textContent = text;
+  btn.style.background = bg;
+  btn.style.color = '#111827';
+  btn.style.border = 'none';
+  btn.style.borderRadius = '6px';
+  btn.style.padding = '6px 8px';
+  btn.style.cursor = 'pointer';
+  btn.style.font = '12px system-ui, sans-serif';
+  return btn;
+}
+
 export function createTimeOverlay(map, { position = 'topright', intervalMs = 1000 } = {}) {
   let container = null;
   let timeLabel = null;
   let timerLabel = null;
-  let startButton = null;
+  let notifsButton = null;
   let intervalId = null;
   let timerRemaining = 0;
+  let notifsEnabled = false;
+  let onEnableNotifs = null;
+  let onDisableNotifs = null;
+  let onTestNotif = null;
 
   const control = L.control({ position });
   control.onAdd = () => {
@@ -37,29 +56,60 @@ export function createTimeOverlay(map, { position = 'topright', intervalMs = 100
     timeLabel = L.DomUtil.create('div', '', container);
     timeLabel.textContent = formatTime(new Date());
 
+    // Timer caché par défaut — apparaît uniquement lors de l'événement
     timerLabel = L.DomUtil.create('div', '', container);
-    timerLabel.textContent = 'Timer: 01:00';
-    timerLabel.style.opacity = '0.8';
+    timerLabel.style.display = 'none';
+    timerLabel.style.fontSize = '22px';
+    timerLabel.style.fontWeight = 'bold';
+    timerLabel.style.color = '#fbbf24';
+    timerLabel.style.letterSpacing = '2px';
 
-    startButton = L.DomUtil.create('button', '', container);
-    startButton.type = 'button';
-    startButton.textContent = 'Start 1:00';
-    startButton.style.background = '#9ca3af';
-    startButton.style.color = '#111827';
-    startButton.style.border = 'none';
-    startButton.style.borderRadius = '6px';
-    startButton.style.padding = '6px 8px';
-    startButton.style.cursor = 'pointer';
-    startButton.style.font = '12px system-ui, sans-serif';
+    notifsButton = makeButton('Activer notifs', '#60a5fa');
+    container.appendChild(notifsButton);
+    notifsButton.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (notifsEnabled) {
+        notifsEnabled = false;
+        localStorage.setItem(NOTIFS_KEY, 'false');
+        notifsButton.textContent = 'Activer notifs';
+        notifsButton.style.background = '#60a5fa';
+        notifsButton.disabled = false;
+        onDisableNotifs?.();
+      } else {
+        notifsButton.disabled = true;
+        notifsButton.textContent = '...';
+        onEnableNotifs?.((result) => {
+          if (result?.granted) {
+            notifsEnabled = true;
+            localStorage.setItem(NOTIFS_KEY, 'true');
+            notifsButton.textContent = 'Désactiver notifs';
+            notifsButton.style.background = '#4ade80';
+            notifsButton.disabled = false;
+          } else {
+            notifsButton.textContent = 'Permission refusée';
+            notifsButton.style.background = '#f87171';
+            notifsButton.disabled = false;
+          }
+        });
+      }
+    });
 
-    startButton.addEventListener('click', (event) => {
-      event.preventDefault();
-      timerRemaining = 60;
-      timerLabel.textContent = `Timer: ${formatCountdown(timerRemaining)}`;
+    const testButton = makeButton('Test notif', '#fbbf24');
+    container.appendChild(testButton);
+    testButton.addEventListener('click', (e) => {
+      e.preventDefault();
+      onTestNotif?.();
     });
 
     L.DomEvent.disableClickPropagation(container);
     L.DomEvent.disableScrollPropagation(container);
+
+    // Restaure l'état sauvegardé si la permission est déjà accordée
+    if (localStorage.getItem(NOTIFS_KEY) === 'true' && Notification.permission === 'granted') {
+      notifsEnabled = true;
+      notifsButton.textContent = 'Désactiver notifs';
+      notifsButton.style.background = '#4ade80';
+    }
 
     return container;
   };
@@ -67,14 +117,23 @@ export function createTimeOverlay(map, { position = 'topright', intervalMs = 100
   control.addTo(map);
 
   intervalId = setInterval(() => {
-    if (!timeLabel || !timerLabel) return;
+    if (!timeLabel) return;
     timeLabel.textContent = formatTime(new Date());
 
     if (timerRemaining > 0) {
       timerRemaining -= 1;
-      timerLabel.textContent = `Timer: ${formatCountdown(timerRemaining)}`;
+      if (timerLabel) timerLabel.textContent = formatCountdown(timerRemaining);
+      if (timerRemaining === 0 && timerLabel) timerLabel.style.display = 'none';
     }
   }, intervalMs);
+
+  function startTimer(seconds = 60) {
+    timerRemaining = seconds;
+    if (timerLabel) {
+      timerLabel.textContent = formatCountdown(timerRemaining);
+      timerLabel.style.display = 'block';
+    }
+  }
 
   function remove() {
     if (intervalId) clearInterval(intervalId);
@@ -83,8 +142,14 @@ export function createTimeOverlay(map, { position = 'topright', intervalMs = 100
     container = null;
     timeLabel = null;
     timerLabel = null;
-    startButton = null;
+    notifsButton = null;
   }
 
-  return { remove };
+  return {
+    remove,
+    startTimer,
+    onEnableNotifs: (handler) => { onEnableNotifs = handler; },
+    onDisableNotifs: (handler) => { onDisableNotifs = handler; },
+    onTestNotif: (handler) => { onTestNotif = handler; }
+  };
 }

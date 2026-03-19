@@ -6,6 +6,7 @@ import { createUserLocationLayer } from '../overlays/user-location-layer.js';
 import { createTimeOverlay } from '../overlays/time-overlay.js';
 import { createCameraController } from '../camera/camera-controller.js';
 import { startGeolocation } from '../services/geolocation.js';
+import { createNotificationScheduler } from '../services/notification-scheduler.js';
 import { state } from './state.js';
 
 export function bootstrapApp() {
@@ -17,6 +18,30 @@ export function bootstrapApp() {
   const userLocationLayer = createUserLocationLayer(mapView.map);
   const timeOverlay = createTimeOverlay(mapView.map);
   const cameraController = createCameraController();
+
+  // Le scheduler programme le déclenchement dès la création.
+  // Le timer et la caméra se lancent automatiquement à l'heure — pas besoin de clic.
+  // "Activer notifs" ne sert qu'à autoriser la popup de notification système.
+  const scheduler = createNotificationScheduler({
+    scheduledTimes: [{ hour: 15, minute: 20 }],
+    onTrigger: () => {
+      timeOverlay.startTimer(60);
+      cameraController.open();
+    }
+  });
+
+  timeOverlay.onEnableNotifs((callback) => {
+    scheduler.enableNotifications(callback);
+  });
+
+  timeOverlay.onDisableNotifs(() => {
+    // La permission navigateur ne peut pas être révoquée par JS,
+    // mais on ne montrera plus la popup système lors du prochain déclenchement.
+  });
+
+  timeOverlay.onTestNotif(() => {
+    scheduler.testFire();
+  });
 
   const stopGeolocation = startGeolocation({
     onUpdate: (location) => {
@@ -34,6 +59,7 @@ export function bootstrapApp() {
 
   return function teardown() {
     stopGeolocation();
+    scheduler.remove();
     userLocationLayer.remove();
     timeOverlay.remove();
     cameraController.remove();
