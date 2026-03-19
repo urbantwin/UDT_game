@@ -75,10 +75,14 @@ export function createCameraController({ container } = {}) {
     }
   });
 
+  function open() {
+    overlay.openPanel();
+  }
+
   function remove() {
     if (stream) stopCamera(stream);
     overlay.remove();
   }
 
-  return { remove };
+  return { remove, open };
 }

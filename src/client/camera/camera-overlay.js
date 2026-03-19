@@ -106,6 +106,11 @@ export function createCameraOverlay({ container = document.body } = {}) {
     status.textContent = text ?? '';
   }
 
+  function openPanel() {
+    panel.style.display = 'block';
+    onOpen?.();
+  }
+
   function remove() {
     root.remove();
   }
@@ -125,6 +130,7 @@ export function createCameraOverlay({ container = document.body } = {}) {
     hide: () => {
       panel.style.display = 'none';
     },
+    openPanel,
     remove
   };
 }
