@@ -1,11 +1,17 @@
-// Initialisation de l'application — câblage Leaflet + géolocalisation + state.
+﻿// Initialisation de l'application â€” cÃ¢blage Leaflet + gÃ©olocalisation + state.
+// Multiplayer note:
+// - Wire a real-time gallery service here (WebSocket/SSE) to keep photos in sync.
 
 import { mapConfig } from '../map/map-config.js';
 import { createMapView } from '../map/map-view.js';
 import { createUserLocationLayer } from '../overlays/user-location-layer.js';
+import { createPhotoMarkersLayer } from '../overlays/photo-markers-layer.js';
 import { createTimeOverlay } from '../overlays/time-overlay.js';
 import { createCameraController } from '../camera/camera-controller.js';
+import { createGalleryView } from '../gallery/gallery-view.js';
 import { startGeolocation } from '../services/geolocation.js';
+import { getAllPhotos } from '../services/photo-store.js';
+import { createPhotoSync } from '../services/photo-sync.js';
 import { createNotificationScheduler } from '../services/notification-scheduler.js';
 import { state } from './state.js';
 
@@ -16,12 +22,36 @@ export function bootstrapApp() {
   state.map = mapView.map;
 
   const userLocationLayer = createUserLocationLayer(mapView.map);
+  const photoMarkersLayer = createPhotoMarkersLayer(mapView.map);
   const timeOverlay = createTimeOverlay(mapView.map);
-  const cameraController = createCameraController();
+  const galleryView = createGalleryView();
+  const photoSync = createPhotoSync({
+    onRemotePhoto: (photo) => {
+      photoMarkersLayer.addPhoto(photo);
+      galleryView.addPhoto(photo);
+    }
+  });
+  const cameraController = createCameraController({
+    onPhotoSaved: (photo) => {
+      photoMarkersLayer.addPhoto(photo);
+      galleryView.addPhoto(photo);
+      photoSync.uploadPhoto(photo);
+    }
+  });
 
-  // Le scheduler programme le déclenchement dès la création.
-  // Le timer et la caméra se lancent automatiquement à l'heure — pas besoin de clic.
-  // "Activer notifs" ne sert qu'à autoriser la popup de notification système.
+  getAllPhotos()
+    .then((photos) => {
+      photoMarkersLayer.setPhotos(photos);
+      galleryView.setPhotos(photos);
+      return photoSync.loadRemotePhotos();
+    })
+    .catch((error) => {
+      console.warn('Failed to load photos:', error);
+    });
+
+  // Le scheduler programme le dÃ©clenchement dÃ¨s la crÃ©ation.
+  // Le timer et la camÃ©ra se lancent automatiquement Ã  l'heure â€” pas besoin de clic.
+  // "Activer notifs" ne sert qu'Ã  autoriser la popup de notification systÃ¨me.
   const scheduler = createNotificationScheduler({
     scheduledTimes: [{ hour: 15, minute: 20 }],
     onTrigger: () => {
@@ -35,8 +65,8 @@ export function bootstrapApp() {
   });
 
   timeOverlay.onDisableNotifs(() => {
-    // La permission navigateur ne peut pas être révoquée par JS,
-    // mais on ne montrera plus la popup système lors du prochain déclenchement.
+    // La permission navigateur ne peut pas Ãªtre rÃ©voquÃ©e par JS,
+    // mais on ne montrera plus la popup systÃ¨me lors du prochain dÃ©clenchement.
   });
 
   timeOverlay.onTestNotif(() => {
@@ -61,7 +91,10 @@ export function bootstrapApp() {
     stopGeolocation();
     scheduler.remove();
     userLocationLayer.remove();
+    photoMarkersLayer.remove();
     timeOverlay.remove();
+    galleryView.remove();
+    photoSync.close();
     cameraController.remove();
     mapView.map.remove();
   };

@@ -1,35 +1,20 @@
 // Camera controller: orchestrates camera service and UI integration.
+// Multiplayer note:
+// - Include authenticated user id when saving a photo.
+// - Send the photo + metadata to a backend, then broadcast to other clients.
+// - Consider optimistic UI updates while awaiting server confirmation.
 
 import { startCamera, stopCamera, capturePhoto } from '../services/camera.js';
+import { savePhotoRecord } from '../services/photo-store.js';
+import { state } from '../app/state.js';
 import { createCameraOverlay } from './camera-overlay.js';
 
-function openPhotoStore() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open('udt-game', 1);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains('photos')) {
-        db.createObjectStore('photos', { keyPath: 'id', autoIncrement: true });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
+function makeClientId() {
+  if (crypto?.randomUUID) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-async function savePhotoRecord(record) {
-  const db = await openPhotoStore();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction('photos', 'readwrite');
-    const store = tx.objectStore('photos');
-    store.add(record);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
-  });
-}
-
-export function createCameraController({ container } = {}) {
+export function createCameraController({ container, onPhotoSaved } = {}) {
   const overlay = createCameraOverlay({ container });
   let stream = null;
   let opening = false;
@@ -61,13 +46,25 @@ export function createCameraController({ container } = {}) {
     overlay.setStatus('Saving...');
     try {
       const photo = await capturePhoto(overlay.video);
-      await savePhotoRecord({
+      const location = state.userLocation
+        ? {
+            lat: state.userLocation.lat,
+            lon: state.userLocation.lon,
+            accuracy: state.userLocation.accuracy ?? null
+          }
+        : null;
+
+      const saved = await savePhotoRecord({
+        clientId: makeClientId(),
         createdAt: Date.now(),
         blob: photo.blob,
         width: photo.width,
         height: photo.height,
-        type: photo.type
+        type: photo.type,
+        location,
+        synced: false
       });
+      onPhotoSaved?.(saved);
       overlay.setStatus('Saved to device');
     } catch (error) {
       console.warn('Capture error:', error);
