@@ -2,32 +2,35 @@
 
 This game project is part of the construction of an EPFL *Digital Twin* within the class **URB-410 Urban digital twins**.
 
-Group members: Rayane Kadiri Hassani, Philip Ojas Ramabadran, Maxime Steiner
+**Group members**: Rayane Kadiri Hassani, Philip Ojas Ramabadran, Maxime Steiner
 
-LLM used for prototyping, vibe coding and structuring the project: GPT-5.2-Codex & Claude Sonnet 4.6
+LLM used for prototyping, vibe coding and structuring the project: *GPT-5.2-Codex & Claude Sonnet 4.6*
 
 3 objectives guiding our work:
 1. A multiplayer game that will help collect valuable data for the development of the digital twin
 2. A flexible implementation to collect targeted data as needed
 3. A smooth and intuitive user experience that "gamifies" scanning of the campus
 
-## General idea
+## General concept
 
 ```
-1. Notification journalière
+Gameplay for users
+1. Everyday before 12 noon, players can take pictures of the campus in the app and subit them to challenge their friends
        ↓
-2. Timer 60s + appareil photo s'ouvrent automatiquement
+2. Everyday at 12 noon, players can see all the pictures that were made and need to find information about them to earn points
        ↓
-3. Le joueur prend une photo du lieu ciblé
+3. Ways to get points are mainly: take the same picture (at the same location) and pin picture location on the map
        ↓
-4. La photo est synchronisée sur le serveur (visible par tous)
+4. The amount of points gained by players is ajusted to encourage campus scanning where the twin most need it (e.g. points x3 if the picture is taken in the Rolex Learning Center, or +100 points if no pictures was taken inside this building before, ...)
        ↓
-5. Les autres joueurs jouent avec la photo (3 mini-jeux)
+5. In addition to the daily challenge, users can also play a weekly challenge with a similar gameplay (allows to collect more focussed data, e.g. food, affluence, ...)
 ```
 
-### Mini-jeux disponibles
+All the geolocated photos of the outside and inside of the campus that are captured are stored in an internal SQLite Database to feed the twin. Complementary projects lead by other students are then supposed to use these pictures to extract information or to model campus using photogrammetry.
 
-| Mini-jeu | Description | Score max |
+### Ideas for daily and weekly challenges
+
+| Type | Description | Pertinence |
 |----------|-------------|-----------|
 | **Où est-ce ?** (Geo-pin) | Placer une épingle sur la carte EPFL pour deviner où la photo a été prise | 1000 pts |
 | **Refais-la !** (Re-photo) | Se rendre au même endroit et prendre une photo sous un angle différent | 300 pts |
@@ -35,28 +38,27 @@ LLM used for prototyping, vibe coding and structuring the project: GPT-5.2-Codex
 
 ---
 
-## Lancer le projet
+## Launch project
 
-### Prérequis
-- Node.js installé
-- Lancer depuis **cmd** (pas PowerShell)
+### Prerequisite
+- Node.js installed --> v24.14.1 (LTS)
 
-### Démarrage complet (serveur + interface)
+### Launching game in dev mode (web interface + API server)
 ```cmd
 npm install
 npm run dev:full
 ```
 
-- Interface web → `http://localhost:5173`
-- Serveur API  → `http://localhost:3001`
+- Web Interface → `http://localhost:5173`
+- API Server → `http://localhost:3001`
 
-### Commandes disponibles
-| Commande | Rôle |
+### Available Commands
+| Command | purpose |
 |----------|------|
-| `npm run dev:full` | Lance le serveur Node + Vite en même temps |
-| `npm run dev` | Lance uniquement Vite (interface) |
-| `npm run server` | Lance uniquement le serveur Node |
-| `npm run build` | Compile pour la production |
+| `npm run dev:full` | Launching Node Server + Vite at the same time |
+| `npm run dev` | Launching Vite only (interface) |
+| `npm run server` | Launching Node Server only |
+| `npm run build` | Compile for production |
 
 ---
 
