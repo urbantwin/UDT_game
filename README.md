@@ -54,7 +54,29 @@ All the geolocated photos of the outside and inside of the campus that are captu
 | Easy config of the game | 🔧 To be designed |
 | Global storing system | 🔧 To be implemented |
 
-## Launch project
+ 
+
+### Expected Deliverables:
+```
+- Deployed prototype of the WebApp 
+- Criteria for validation / design of scoring/”reward” logic 
+- Interface for mobile usage (+ tests on own devices) 
+- Storage logic for output imagery (in accordance with other groups) 
+- Data input logic for weekly challenge extension 
+```
+
+### Indicative timeline: 
+
+| **date** | progress |
+|----|------|
+| **until 01.04.2026** | Basic pap structure, geo-localisation function, multiplayer synchronisation, storage of images |
+| **09.04.2026** | Graphic output, clarified spatial structure (levels), logic of scoring/rewarding implemented |
+| **16.04.2026** | Game ready to be deployed using Render/Railway/Heroku |
+| **23.04.2026** | Mobile interface mock-up |
+
+---
+
+## How to start the game (launching instruction)
 
 ### Prerequisite
 - Node.js installed → v24.14.1 (LTS)
