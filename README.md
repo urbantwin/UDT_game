@@ -1,5 +1,7 @@
 # UDT Game — EPFLGuessr
 
+![logo](./assets/images/logo.jpeg)
+
 This game project is part of the construction of an EPFL *Digital Twin* within the class **URB-410 Urban digital twins**.
 
 **Group members**: Rayane Kadiri Hassani, Philip Ojas Ramabadran, Maxime Steiner
@@ -10,7 +12,7 @@ LLM used for prototyping, vibe coding and structuring the project: *GPT-5.2-Code
 **3 objectives guiding our work**:
 1. A multiplayer game that will help collect valuable data for the development of the digital twin
 2. A flexible implementation to collect targeted data as needed
-3. A smooth and intuitive user experience that "gamifies" scanning of the campus
+3. A smooth and intuitive user experience that "gamifies" scanning of the campus, utilizing individually taken images
  
 ---
 
