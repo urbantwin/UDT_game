@@ -1,7 +1,9 @@
 # UDT Game — EPFLGuessr
 
 This game project is part of the construction of an EPFL *Digital Twin* within the class **URB-410 Urban digital twins**.
+
 Group members: Rayane Kadiri Hassani, Philip Ojas Ramabadran, Maxime Steiner
+
 LLM used for prototyping, vibe coding and structuring the project: GPT-5.2-Codex & Claude Sonnet 4.6
 
 3 objectives guiding our work:
