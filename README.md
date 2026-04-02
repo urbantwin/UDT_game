@@ -46,11 +46,11 @@ All the geolocated photos of the outside and inside of the campus that are captu
 | Multiplayer synchronization (WebSocket) | ✅ Done |
 | Persisting SQLite Database | ✅ Done |
 | Game configuration script | ✅ Done |
-| Mini-jeu Geo-pin | 🔧 À implémenter (UI) |
-| Mini-jeu Re-photo | 🔧 À implémenter (UI) |
-| Mini-jeu Time-guess | 🔧 À implémenter (UI) |
-| Validation qualité des photos | 🔧 À implémenter |
-| Système de score global | 🔧 À implémenter |
+| Pipeline for submitting pictures | 🔧 To be implemented |
+| Pipeline for guessing and re-picture | 🔧 To be implemented |
+| Criteria to validate pictures | To be defined and implemented |
+| Easy config of the game | 🔧 To be designed |
+| Global storing system | 🔧 To be implemented |
 
 ## Launch project
 
@@ -135,100 +135,64 @@ UDT_game/
 
 ---
 
-## Base de données (SQLite)
+## Database (SQLite)
 
-Le fichier `data/photos.db` est créé automatiquement au premier démarrage.
+The file `data/photos.db` is created automatically on first launch.
 
-| Table | Rôle |
-|-------|------|
-| `photos` | Toutes les photos prises (dataUrl, GPS, timestamp) |
-| `challenges` | Défis journaliers (1 lieu cible par jour) |
-| `submissions` | Photos soumises pour un défi |
-| `guesses` | Réponses des joueurs aux mini-jeux + scores |
-
----
-
-## API REST
-
-| Méthode | Route | Description |
-|---------|-------|-------------|
-| `GET` | `/api/photos` | Toutes les photos |
-| `POST` | `/api/photos` | Soumettre une photo |
-| `GET` | `/api/challenge/today` | Défi du jour |
-| `POST` | `/api/challenge/:id/submit` | Lier une photo à un défi |
-| `POST` | `/api/guess` | Soumettre une réponse à un mini-jeu |
-| `GET` | `/api/guess/:photoId` | Scores d'une photo |
+| Table         | Role                                          |
+| ------------- | --------------------------------------------- |
+| `photos`      | All captured photos (dataUrl, GPS, timestamp) |
+| `challenges`  | Daily challenges (1 target location per day)  |
+| `submissions` | Photos submitted for a challenge              |
+| `guesses`     | Player answers to mini-games + scores         |
 
 ---
 
-## Configurer le jeu — `game/game-config.js`
+## REST API
 
-C'est **le seul fichier à éditer** pour changer le comportement du jeu sans toucher au code.
+| Method | Route                       | Description                     |
+| ------ | --------------------------- | ------------------------------- |
+| `GET`  | `/api/photos`               | All photos                      |
+| `POST` | `/api/photos`               | Submit a photo                  |
+| `GET`  | `/api/challenge/today`      | Today’s challenge               |
+| `POST` | `/api/challenge/:id/submit` | Link a photo to a challenge     |
+| `POST` | `/api/guess`                | Submit an answer to a mini-game |
+| `GET`  | `/api/guess/:photoId`       | Scores for a photo              |
 
-### Changer l'heure de notification
+---
+
+## Configure the Game — `game/game-config.js`
+
+This is **the only file to edit** to change the game behavior without modifying the code.
+
+### Change notification time
+
 ```js
 export const DAILY_SCHEDULE = [
-  { hour: 12, minute: 0, label: 'Mission midi' },
-  // { hour: 18, minute: 30, label: 'Mission soir' },  // décommenter pour activer
+  { hour: 12, minute: 0, label: 'Noon mission' },
+  // { hour: 18, minute: 30, label: 'Evening mission' },  // uncomment to enable
 ];
 ```
 
-### Changer le lieu ciblé par jour de la semaine
+### Change the target location by day of the week
+
 ```js
 export const LOCATION_BY_WEEKDAY = {
-  1: 'rolex',       // Lundi   → Rolex Learning Center
-  2: 'bc',          // Mardi   → Bibliothèque BC
-  3: 'esplanade',   // Mercredi→ Esplanade centrale
+  1: 'rolex',       // Monday   → Rolex Learning Center
+  2: 'bc',          // Tuesday  → BC Library
+  3: 'esplanade',   // Wednesday→ Central Esplanade
   // ...
 };
 ```
 
-### Activer / désactiver un mini-jeu
+### Enable / disable a mini-game
+
 ```js
 export const MINIGAMES = {
   geoPin:    { active: true,  ... },
-  rePhoto:   { active: false, ... },  // désactivé
+  rePhoto:   { active: false, ... },  // disabled
   timeGuess: { active: true,  ... },
 };
 ```
 
----
 
-## Ajouter un lieu EPFL — `game/epfl-locations.js`
-
-```js
-{
-  id: 'mon_lieu',
-  label: 'Nom affiché',
-  lat: 46.XXXXX,
-  lng: 6.XXXXX,
-  criteria: ['dezoomed', 'landmark', 'outdoor'],
-  hint: 'Description pour guider le joueur'
-}
-```
-
-**Critères disponibles :**
-- `dezoomed` — au moins 3 m de recul visible
-- `landmark` — un bâtiment identifiable dans le cadre
-- `no_wall` — pas uniquement un mur plat
-- `outdoor` — prise en extérieur
-
----
-
-## État du projet
-
-| Fonctionnalité | État |
-|----------------|------|
-| Carte EPFL interactive (Leaflet + OSM) | ✅ Fait |
-| GPS en temps réel | ✅ Fait |
-| Appareil photo (mobile + desktop) | ✅ Fait |
-| Notification journalière + timer | ✅ Fait |
-| Synchronisation multijoueur (WebSocket) | ✅ Fait |
-| Base de données SQLite persistante | ✅ Fait |
-| Lieux EPFL définis | ✅ Fait (7 lieux) |
-| Script de configuration du jeu | ✅ Fait |
-| Mini-jeu Geo-pin | 🔧 À implémenter (UI) |
-| Mini-jeu Re-photo | 🔧 À implémenter (UI) |
-| Mini-jeu Time-guess | 🔧 À implémenter (UI) |
-| Validation qualité des photos | 🔧 À implémenter |
-| Système de score global | 🔧 À implémenter |
