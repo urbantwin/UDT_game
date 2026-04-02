@@ -3,10 +3,10 @@
 This game project is part of the construction of an EPFL *Digital Twin* within the class **URB-410 Urban digital twins**.
 
 **Group members**: Rayane Kadiri Hassani, Philip Ojas Ramabadran, Maxime Steiner
-
 LLM used for prototyping, vibe coding and structuring the project: *GPT-5.2-Codex & Claude Sonnet 4.6*
 
-3 objectives guiding our work:
+
+**3 objectives guiding our work**:
 1. A multiplayer game that will help collect valuable data for the development of the digital twin
 2. A flexible implementation to collect targeted data as needed
 3. A smooth and intuitive user experience that "gamifies" scanning of the campus
@@ -15,15 +15,17 @@ LLM used for prototyping, vibe coding and structuring the project: *GPT-5.2-Code
 
 ```
 Gameplay for users
-1. Everyday before 12 noon, players can take pictures of the campus in the app and subit them to challenge their friends
+1. Everyday before 12 noon, players can take pictures of the campus in the app and submit them to challenge their friends
        ↓
 2. Everyday at 12 noon, players can see all the pictures that were made and need to find information about them to earn points
        ↓
 3. Ways to get points are mainly: take the same picture (at the same location) and pin picture location on the map
        ↓
-4. The amount of points gained by players is ajusted to encourage campus scanning where the twin most need it (e.g. points x3 if the picture is taken in the Rolex Learning Center, or +100 points if no pictures was taken inside this building before, ...)
+4. The amount of points gained by players is ajusted to encourage campus scanning where the twin most need it
+(e.g. points x3 if the picture is taken in the Rolex Learning Center, or +100 points if no pictures was taken inside this building before, ...)
        ↓
-5. In addition to the daily challenge, users can also play a weekly challenge with a similar gameplay (allows to collect more focussed data, e.g. food, affluence, ...)
+5. In addition to the daily challenge, users can also play a weekly challenge with a similar gameplay
+(allows to collect more focussed data, e.g. food, affluence, ...)
 ```
 
 All the geolocated photos of the outside and inside of the campus that are captured are stored in an internal SQLite Database to feed the twin. Complementary projects lead by other students are then supposed to use these pictures to extract information or to model campus using photogrammetry.
