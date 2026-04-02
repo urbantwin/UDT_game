@@ -11,6 +11,8 @@ LLM used for prototyping, vibe coding and structuring the project: *GPT-5.2-Code
 1. A multiplayer game that will help collect valuable data for the development of the digital twin
 2. A flexible implementation to collect targeted data as needed
 3. A smooth and intuitive user experience that "gamifies" scanning of the campus
+ 
+---
 
 ## General concept
 
@@ -31,15 +33,24 @@ Gameplay for users
 
 All the geolocated photos of the outside and inside of the campus that are captured are stored in an internal SQLite Database to feed the twin. Complementary projects lead by other students are then supposed to use these pictures to extract information or to model campus using photogrammetry.
 
-### Ideas for daily and weekly challenges
-
-| Type | Description | Pertinence |
-|----------|-------------|-----------|
-| **Où est-ce ?** (Geo-pin) | Placer une épingle sur la carte EPFL pour deviner où la photo a été prise | 1000 pts |
-| **Refais-la !** (Re-photo) | Se rendre au même endroit et prendre une photo sous un angle différent | 300 pts |
-| **À quelle heure ?** (Time-guess) | Deviner à quelle heure la photo a été prise | 500 pts |
-
 ---
+
+## Current state of the project
+
+| Feature | Status |
+|----------------|------|
+| Basic interactive EPFL map (Leaflet + OSM) | ✅ Done |
+| Real-time geolocation of users and pictures | ✅ Done |
+| Taking pictures (mobile + desktop) | ✅ Done |
+| Daily notification | To be adapted |
+| Multiplayer synchronization (WebSocket) | ✅ Done |
+| Persisting SQLite Database | ✅ Done |
+| Game configuration script | ✅ Done |
+| Mini-jeu Geo-pin | 🔧 À implémenter (UI) |
+| Mini-jeu Re-photo | 🔧 À implémenter (UI) |
+| Mini-jeu Time-guess | 🔧 À implémenter (UI) |
+| Validation qualité des photos | 🔧 À implémenter |
+| Système de score global | 🔧 À implémenter |
 
 ## Launch project
 
@@ -70,55 +81,55 @@ npm run dev:full
 ```
 UDT_game/
 │
-├── game/                          ← SCRIPT DU JEU (à éditer pour changer les règles)
-│   ├── game-config.js             ← Horaires, lieux par jour, mini-jeux actifs, scores
-│   └── epfl-locations.js          ← Base des 7 lieux EPFL reconnaissables
+├── game/                          ← GAME SCRIPT (edit to change rules)
+│   ├── game-config.js             ← Schedule, daily locations, active mini-games, scores
+│   └── epfl-locations.js          ← Database of 7 recognizable EPFL locations
 │
 ├── src/
-│   ├── client/                    ← Code navigateur (Vite / JS vanilla)
+│   ├── client/                    ← Browser code (Vite / vanilla JS)
 │   │   ├── app/
-│   │   │   ├── bootstrap.js       ← Point d'entrée : câble tous les modules ensemble
-│   │   │   └── state.js           ← État global partagé (carte, GPS)
+│   │   │   ├── bootstrap.js       ← Entry point: wires all modules together
+│   │   │   └── state.js           ← Shared global state (map, GPS)
 │   │   │
 │   │   ├── map/
-│   │   │   ├── map-config.js      ← Centrage, zoom, limites de la carte EPFL
-│   │   │   └── map-view.js        ← Création de la carte Leaflet
+│   │   │   ├── map-config.js      ← Centering, zoom, EPFL map boundaries
+│   │   │   └── map-view.js        ← Creates the Leaflet map
 │   │   │
 │   │   ├── camera/
-│   │   │   ├── camera-controller.js  ← Orchestre l'ouverture/capture/sauvegarde
-│   │   │   └── camera-overlay.js     ← Interface visuelle de l'appareil photo
+│   │   │   ├── camera-controller.js  ← Orchestrates open/capture/save
+│   │   │   └── camera-overlay.js     ← Camera UI overlay
 │   │   │
 │   │   ├── gallery/
-│   │   │   └── gallery-view.js    ← Panneau qui liste les photos prises
+│   │   │   └── gallery-view.js    ← Panel listing captured photos
 │   │   │
 │   │   ├── overlays/
-│   │   │   ├── time-overlay.js         ← Horloge, timer, boutons notifs
-│   │   │   ├── user-location-layer.js  ← Marqueur GPS de l'utilisateur sur la carte
-│   │   │   └── photo-markers-layer.js  ← Marqueurs des photos sur la carte
+│   │   │   ├── time-overlay.js         ← Clock, timer, notification buttons
+│   │   │   ├── user-location-layer.js  ← User GPS marker on the map
+│   │   │   └── photo-markers-layer.js  ← Photo markers on the map
 │   │   │
-│   │   ├── minigames/             ← Un dossier par mini-jeu (UI à implémenter)
+│   │   ├── minigames/             ← One folder per mini-game (UI to implement)
 │   │   │   ├── geo-pin/
-│   │   │   │   └── geo-pin-ui.js       ← [stub] Épingler la position sur la carte
+│   │   │   │   └── geo-pin-ui.js       ← [stub] Pin the location on the map
 │   │   │   ├── re-photo/
-│   │   │   │   └── re-photo-ui.js      ← [stub] Retourner au lieu et rephotographier
+│   │   │   │   └── re-photo-ui.js      ← [stub] Return to the location and retake photo
 │   │   │   └── time-guess/
-│   │   │       └── time-guess-ui.js    ← [stub] Deviner l'heure de la photo
+│   │   │       └── time-guess-ui.js    ← [stub] Guess the time the photo was taken
 │   │   │
 │   │   └── services/
-│   │       ├── notification-scheduler.js  ← Planifie les notifications journalières
-│   │       ├── photo-store.js             ← Stockage local des photos (IndexedDB)
-│   │       ├── photo-sync.js              ← Sync photos avec le serveur (REST + WebSocket)
-│   │       └── geolocation.js             ← GPS en temps réel
+│   │       ├── notification-scheduler.js  ← Schedules daily notifications
+│   │       ├── photo-store.js             ← Local photo storage (IndexedDB)
+│   │       ├── photo-sync.js              ← Sync photos with server (REST + WebSocket)
+│   │       └── geolocation.js             ← Real-time GPS
 │   │
-│   └── server/                    ← Serveur Node.js (Express + WebSocket + SQLite)
-│       ├── index.js               ← Routes API REST + WebSocket
-│       └── db.js                  ← Base de données SQLite locale
+│   └── server/                    ← Node.js server (Express + WebSocket + SQLite)
+│       ├── index.js               ← REST API routes + WebSocket
+│       └── db.js                  ← Local SQLite database
 │
 ├── data/
-│   └── photos.db                  ← Base SQLite (créée auto, ignorée par git)
+│   └── photos.db                  ← SQLite database (auto-created, git-ignored)
 │
-├── index.html                     ← Page HTML principale
-├── vite.config.js                 ← Config Vite (accès LAN activé)
+├── index.html                     ← Main HTML page
+├── vite.config.js                 ← Vite config (LAN access enabled)
 └── package.json
 ```
 
