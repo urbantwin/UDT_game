@@ -44,7 +44,7 @@ All the geolocated photos of the outside and inside of the campus that are captu
 ## Launch project
 
 ### Prerequisite
-- Node.js installed --> v24.14.1 (LTS)
+- Node.js installed → v24.14.1 (LTS)
 
 ### Launching game in dev mode (web interface + API server)
 ```cmd
@@ -56,7 +56,7 @@ npm run dev:full
 - API Server → `http://localhost:3001`
 
 ### Available Commands
-| Command | purpose |
+| Command | Purpose |
 |----------|------|
 | `npm run dev:full` | Launching Node Server + Vite at the same time |
 | `npm run dev` | Launching Vite only (interface) |
