@@ -1,4 +1,4 @@
-import sqlite3 from 'sqlite3';
+﻿import sqlite3 from 'sqlite3';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -31,7 +31,7 @@ export async function getDb() {
     dataUrl   TEXT    NOT NULL
   )`);
 
-  // Défis journaliers : un lieu cible par jour
+  // DÃ©fis journaliers : un lieu cible par jour
   await run(_db, `CREATE TABLE IF NOT EXISTS challenges (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     date       TEXT    NOT NULL UNIQUE,  -- YYYY-MM-DD
@@ -45,16 +45,24 @@ export async function getDb() {
     challengeId INTEGER NOT NULL REFERENCES challenges(id),
     photoId     INTEGER NOT NULL REFERENCES photos(id),
     clientId    TEXT,
+    playerId    TEXT,
     createdAt   INTEGER NOT NULL
   )`);
 
-  // Réponses des joueurs aux mini-jeux
+  // Migration douce : ajoute playerId si la table existait déjà
+  try {
+    await run(_db, 'ALTER TABLE submissions ADD COLUMN playerId TEXT');
+  } catch {
+    // Ignore si la colonne existe déjà
+  }
+
+  // RÃ©ponses des joueurs aux mini-jeux
   await run(_db, `CREATE TABLE IF NOT EXISTS guesses (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     photoId     INTEGER NOT NULL REFERENCES photos(id),
     clientId    TEXT,
     type        TEXT    NOT NULL,  -- 'geo-pin' | 'time-guess' | 're-photo'
-    payload     TEXT    NOT NULL,  -- JSON de la réponse
+    payload     TEXT    NOT NULL,  -- JSON de la rÃ©ponse
     score       INTEGER,
     createdAt   INTEGER NOT NULL
   )`);
@@ -79,3 +87,5 @@ export function all(db, sql, params = []) {
     });
   });
 }
+
+

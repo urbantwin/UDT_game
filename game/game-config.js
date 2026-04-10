@@ -21,6 +21,7 @@ import { EPFL_LOCATIONS } from './epfl-locations.js';
 // ─────────────────────────────────────────────
 export const DAILY_SCHEDULE = [
   { hour: 12, minute: 0,  label: 'Mission midi' },
+  { hour: 16, minute: 29, label: 'Evening mission' }
   // { hour: 18, minute: 30, label: 'Mission fin de journée' },  // décommenter pour activer
 ];
 
@@ -135,4 +136,13 @@ export const GAME_SETTINGS = {
 
   // Afficher le lieu cible aux joueurs avant la mission ?
   showTargetBeforeMission: false,
+};
+
+// ───────────────────────────────────────────────────────────────────────────────
+// 7. FENÊTRE D'AUTORISATION DES SOUMISSIONS
+//    Les joueurs peuvent soumettre leurs photos uniquement dans ce créneau.
+// ───────────────────────────────────────────────────────────────────────────────
+export const SUBMISSION_WINDOW = {
+  start: { hour: 0, minute: 1 },   // 00:01
+  end:   { hour: 23, minute: 59 }, // 11:59
 };

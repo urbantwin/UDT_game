@@ -100,8 +100,10 @@ export function createPhotoSync({ onRemotePhoto } = {}) {
           synced: true
         });
       }
+      return result.id;
     } catch (error) {
       console.warn('Photo sync upload failed:', error);
+      return null;
     }
   }
 

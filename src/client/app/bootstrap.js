@@ -12,6 +12,7 @@ import { createGalleryView } from '../gallery/gallery-view.js';
 import { startGeolocation } from '../services/geolocation.js';
 import { getAllPhotos } from '../services/photo-store.js';
 import { createPhotoSync } from '../services/photo-sync.js';
+import { getTodayChallenge, submitPhotoToChallenge } from '../services/challenge-api.js';
 import { createNotificationScheduler } from '../services/notification-scheduler.js';
 import { state } from './state.js';
 
@@ -24,7 +25,23 @@ export function bootstrapApp() {
   const userLocationLayer = createUserLocationLayer(mapView.map);
   const photoMarkersLayer = createPhotoMarkersLayer(mapView.map);
   const timeOverlay = createTimeOverlay(mapView.map);
-  const galleryView = createGalleryView();
+  const galleryView = createGalleryView({
+    onSubmit: async ({ photo }) => {
+      const challenge = await getTodayChallenge();
+      let remoteId = photo.remoteId ?? null;
+      if (!remoteId) {
+        remoteId = await photoSync.uploadPhoto(photo);
+      }
+      if (!remoteId) {
+        throw new Error('Photo not synced yet.');
+      }
+      await submitPhotoToChallenge({
+        challengeId: challenge.id,
+        photoId: remoteId,
+        playerId: state.player?.id ?? photo.clientId ?? null
+      });
+    }
+  });
   const photoSync = createPhotoSync({
     onRemotePhoto: (photo) => {
       photoMarkersLayer.addPhoto(photo);

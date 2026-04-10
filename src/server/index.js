@@ -3,6 +3,8 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import { getDb, run, all } from './db.js';
+import { GAME_SETTINGS, SUBMISSION_WINDOW, getTodayLocation } from '../../game/game-config.js';
+import { getLocationById } from '../../game/epfl-locations.js';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 
@@ -67,7 +69,7 @@ app.post('/api/photos', async (req, res) => {
 app.get('/api/challenge/today', async (req, res) => {
   try {
     const db = await getDb();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = formatLocalDate(new Date());
     let challenge = (await all(db, 'SELECT * FROM challenges WHERE date = ?', [today]))[0];
     if (!challenge) {
       // Le locationId par défaut ; le client peut surcharger via game-config.js
@@ -87,13 +89,69 @@ app.get('/api/challenge/today', async (req, res) => {
 // POST /api/challenge/:id/submit  → soumettre une photo pour un défi
 app.post('/api/challenge/:id/submit', async (req, res) => {
   const challengeId = Number(req.params.id);
-  const { photoId, clientId } = req.body || {};
+  const { photoId, clientId, playerId } = req.body || {};
   if (!photoId) { res.status(400).json({ error: 'Missing photoId.' }); return; }
   try {
     const db = await getDb();
+    const challenge = await getChallengeById(db, challengeId);
+    if (!challenge) {
+      res.status(404).json({ error: 'Challenge not found.' });
+      return;
+    }
+
+    const now = new Date();
+    if (!isSameDay(now, challenge.date) || !isWithinSubmissionWindow(challenge.date, now)) {
+      res.status(400).json({ error: 'Submission window closed.' });
+      return;
+    }
+
+    const photo = await getPhotoById(db, photoId);
+    if (!photo) {
+      res.status(404).json({ error: 'Photo not found.' });
+      return;
+    }
+
+    const photoLocation = safeJsonParse(photo.location);
+    if (!photoLocation) {
+      res.status(400).json({ error: 'Photo has no location.' });
+      return;
+    }
+
+    if (!isSameDay(new Date(photo.createdAt), challenge.date)) {
+      res.status(400).json({ error: 'Photo was not taken today.' });
+      return;
+    }
+
+    const targetLocation = getLocationById(challenge.locationId) ?? getTodayLocation();
+    const targetLat = targetLocation?.lat;
+    const targetLon = targetLocation?.lng;
+    if (targetLat == null || targetLon == null) {
+      res.status(400).json({ error: 'Challenge target not configured.' });
+      return;
+    }
+
+   // Default:  do not restrict the photo location to a specific target area
+   // const dist = haversineMeters(targetLat, targetLon, photoLocation.lat, photoLocation.lon ?? photoLocation.lng);
+   // if (dist > GAME_SETTINGS.validPhotoRadiusMeters) {
+   //   res.status(400).json({ error: 'Photo is outside target area.' });
+   //   return;
+   // }
+
+    const playerKey = playerId ?? clientId ?? null;
+    if (playerKey) {
+      const existing = await all(db,
+        'SELECT COUNT(*) as count FROM submissions WHERE challengeId = ? AND playerId = ?',
+        [challengeId, playerKey]
+      );
+      if ((existing[0]?.count ?? 0) >= GAME_SETTINGS.maxPhotosPerDay) {
+        res.status(400).json({ error: 'Submission limit reached.' });
+        return;
+      }
+    }
+
     const result = await run(db,
-      'INSERT INTO submissions (challengeId, photoId, clientId, createdAt) VALUES (?, ?, ?, ?)',
-      [challengeId, photoId, clientId ?? null, Date.now()]
+      'INSERT INTO submissions (challengeId, photoId, clientId, playerId, createdAt) VALUES (?, ?, ?, ?, ?)',
+      [challengeId, photoId, clientId ?? null, playerKey, Date.now()]
     );
     res.json({ id: result.lastID });
   } catch (err) {
@@ -143,6 +201,49 @@ app.get('/api/guess/:photoId', async (req, res) => {
 
 async function getPhotoMeta(db, photoId) {
   return (await all(db, 'SELECT createdAt, location FROM photos WHERE id = ?', [photoId]))[0] ?? null;
+}
+
+async function getPhotoById(db, photoId) {
+  return (await all(db, 'SELECT * FROM photos WHERE id = ?', [photoId]))[0] ?? null;
+}
+
+async function getChallengeById(db, challengeId) {
+  return (await all(db, 'SELECT * FROM challenges WHERE id = ?', [challengeId]))[0] ?? null;
+}
+
+function isSameDay(date, dateStr) {
+  if (!(date instanceof Date)) return false;
+  return formatLocalDate(date) === dateStr;
+}
+
+function isWithinSubmissionWindow(dateStr, now = new Date()) {
+  const start = SUBMISSION_WINDOW?.start ?? { hour: 0, minute: 0 };
+  const end = SUBMISSION_WINDOW?.end ?? { hour: 23, minute: 59 };
+  const toMinutes = (t) => t.hour * 60 + t.minute;
+  const startMin = toMinutes(start);
+  const endMin = toMinutes(end);
+  const currentMin = now.getHours() * 60 + now.getMinutes();
+
+  if (startMin <= endMin) {
+    return currentMin >= startMin && currentMin <= endMin;
+  }
+  return currentMin >= startMin || currentMin <= endMin;
+}
+
+function formatLocalDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function safeJsonParse(value) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 function computeScore(type, payload, photo) {

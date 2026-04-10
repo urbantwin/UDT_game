@@ -1,9 +1,11 @@
-// Gallery view: small panel listing saved photos.
+﻿// Gallery view: small panel listing saved photos.
 // Multiplayer note:
 // - Update this view from a shared real-time photo feed (WebSocket/SSE).
 // - Add filters for user/team and handle live insertions/removals.
 
-export function createGalleryView({ container = document.body } = {}) {
+import { SUBMISSION_WINDOW } from '../../../game/game-config.js';
+
+export function createGalleryView({ container = document.body, onSubmit } = {}) {
   const root = document.createElement('div');
   root.style.position = 'fixed';
   root.style.right = '16px';
@@ -54,6 +56,20 @@ export function createGalleryView({ container = document.body } = {}) {
     objectUrls = [];
   }
 
+  function isSubmissionWindowOpen(now = new Date()) {
+    const toMinutes = (t) => (t.hour * 60 + t.minute);
+    const start = SUBMISSION_WINDOW?.start ?? { hour: 0, minute: 0 };
+    const end = SUBMISSION_WINDOW?.end ?? { hour: 23, minute: 59 };
+    const current = now.getHours() * 60 + now.getMinutes();
+    const startMin = toMinutes(start);
+    const endMin = toMinutes(end);
+    if (startMin <= endMin) {
+      return current >= startMin && current <= endMin;
+    }
+    // Handles ranges that cross midnight.
+    return current >= startMin || current <= endMin;
+  }
+
   function setPhotos(photos) {
     currentPhotos = photos.slice();
     clearObjectUrls();
@@ -73,6 +89,12 @@ export function createGalleryView({ container = document.body } = {}) {
       item.style.display = 'flex';
       item.style.gap = '8px';
       item.style.alignItems = 'center';
+      item.style.justifyContent = 'space-between';
+
+      const left = document.createElement('div');
+      left.style.display = 'flex';
+      left.style.gap = '8px';
+      left.style.alignItems = 'center';
 
       const img = document.createElement('img');
       const url = URL.createObjectURL(photo.blob);
@@ -105,8 +127,62 @@ export function createGalleryView({ container = document.body } = {}) {
 
       meta.appendChild(time);
       meta.appendChild(loc);
-      item.appendChild(img);
-      item.appendChild(meta);
+      left.appendChild(img);
+      left.appendChild(meta);
+      item.appendChild(left);
+
+      const right = document.createElement('div');
+      right.style.display = 'flex';
+      right.style.flexDirection = 'column';
+      right.style.alignItems = 'flex-end';
+      right.style.gap = '4px';
+
+      const submitButton = document.createElement('button');
+      submitButton.type = 'button';
+      submitButton.textContent = 'Submit';
+      submitButton.style.background = '#60a5fa';
+      submitButton.style.color = '#111827';
+      submitButton.style.border = 'none';
+      submitButton.style.borderRadius = '6px';
+      submitButton.style.padding = '4px 6px';
+      submitButton.style.cursor = 'pointer';
+      submitButton.style.font = '11px system-ui, sans-serif';
+
+      const status = document.createElement('div');
+      status.style.font = '10px system-ui, sans-serif';
+      status.style.opacity = '0.8';
+
+      const hasLocation = Boolean(photo.location);
+      const withinWindow = isSubmissionWindowOpen();
+      const canSubmit = hasLocation && withinWindow;
+      if (!canSubmit) {
+        submitButton.disabled = true;
+        submitButton.style.opacity = '0.5';
+        if (!withinWindow) {
+          status.textContent = 'Window closed';
+        } else {
+          status.textContent = 'No GPS';
+        }
+      }
+
+      submitButton.addEventListener('click', async (event) => {
+        event.preventDefault();
+        if (!onSubmit) return;
+        submitButton.disabled = true;
+        status.textContent = 'Submitting...';
+        try {
+          await onSubmit({ photo });
+          status.textContent = 'Submitted';
+          submitButton.style.opacity = '0.6';
+        } catch (error) {
+          status.textContent = error?.message ?? 'Failed';
+          submitButton.disabled = false;
+        }
+      });
+
+      right.appendChild(submitButton);
+      right.appendChild(status);
+      item.appendChild(right);
       list.appendChild(item);
     }
   }
