@@ -20,8 +20,17 @@ let _db = null;
 export async function getDb() {
   if (_db) return _db;
   _db = await openDb(DB_PATH);
+
+  await run(_db, `CREATE TABLE IF NOT EXISTS users (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    username     TEXT    NOT NULL UNIQUE,
+    passwordHash TEXT    NOT NULL,
+    createdAt    INTEGER NOT NULL
+  )`);
+
   await run(_db, `CREATE TABLE IF NOT EXISTS photos (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId    INTEGER REFERENCES users(id),
     clientId  TEXT,
     createdAt INTEGER NOT NULL,
     width     INTEGER,
@@ -46,6 +55,7 @@ export async function getDb() {
     photoId     INTEGER NOT NULL REFERENCES photos(id),
     clientId    TEXT,
     playerId    TEXT,
+    userId      INTEGER REFERENCES users(id),
     createdAt   INTEGER NOT NULL
   )`);
 
@@ -55,17 +65,33 @@ export async function getDb() {
   } catch {
     // Ignore si la colonne existe déjà
   }
+  try {
+    await run(_db, 'ALTER TABLE submissions ADD COLUMN userId INTEGER REFERENCES users(id)');
+  } catch {
+    // Ignore si la colonne existe déjà
+  }
+  try {
+    await run(_db, 'ALTER TABLE photos ADD COLUMN userId INTEGER REFERENCES users(id)');
+  } catch {
+    // Ignore si la colonne existe déjà
+  }
 
   // RÃ©ponses des joueurs aux mini-jeux
   await run(_db, `CREATE TABLE IF NOT EXISTS guesses (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     photoId     INTEGER NOT NULL REFERENCES photos(id),
     clientId    TEXT,
+    userId      INTEGER REFERENCES users(id),
     type        TEXT    NOT NULL,  -- 'geo-pin' | 'time-guess' | 're-photo'
     payload     TEXT    NOT NULL,  -- JSON de la rÃ©ponse
     score       INTEGER,
     createdAt   INTEGER NOT NULL
   )`);
+  try {
+    await run(_db, 'ALTER TABLE guesses ADD COLUMN userId INTEGER REFERENCES users(id)');
+  } catch {
+    // Ignore si la colonne existe déjà
+  }
 
   return _db;
 }

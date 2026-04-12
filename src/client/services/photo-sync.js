@@ -6,6 +6,7 @@ import {
   savePhotoRecord,
   updatePhotoRecord
 } from './photo-store.js';
+import { authHeaders, getStoredToken } from './auth-api.js';
 
 function getApiBase() {
   if (import.meta.env.DEV) {
@@ -51,6 +52,7 @@ export function createPhotoSync({ onRemotePhoto } = {}) {
     const blob = await dataUrlToBlob(remote.dataUrl);
     const saved = await savePhotoRecord({
       remoteId: remote.id,
+      userId: remote.userId ?? null,
       clientId: remote.clientId ?? null,
       createdAt: remote.createdAt,
       blob,
@@ -75,6 +77,7 @@ export function createPhotoSync({ onRemotePhoto } = {}) {
 
   async function uploadPhoto(localPhoto) {
     if (!localPhoto?.blob) return;
+    if (!getStoredToken()) return null;
     try {
       const dataUrl = await blobToDataUrl(localPhoto.blob);
       const payload = {
@@ -89,7 +92,7 @@ export function createPhotoSync({ onRemotePhoto } = {}) {
 
       const res = await fetch(`${apiBase}/api/photos`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(payload)
       });
       if (!res.ok) throw new Error('Photo upload failed.');

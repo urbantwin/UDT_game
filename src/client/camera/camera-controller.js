@@ -56,6 +56,7 @@ export function createCameraController({ container, onPhotoSaved } = {}) {
 
       const saved = await savePhotoRecord({
         clientId: makeClientId(),
+        userId: state.player?.id ?? null,
         createdAt: Date.now(),
         blob: photo.blob,
         width: photo.width,

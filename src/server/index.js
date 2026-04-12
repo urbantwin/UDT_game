@@ -3,6 +3,7 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import { getDb, run, all } from './db.js';
+import { hashPassword, verifyPassword, createToken, requireAuth, getTokenConfig } from './auth.js';
 import { GAME_SETTINGS, SUBMISSION_WINDOW, getTodayLocation } from '../../game/game-config.js';
 import { getLocationById } from '../../game/epfl-locations.js';
 
@@ -11,6 +12,74 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '15mb' }));
+
+// ---- AUTH ----
+app.post('/api/auth/register', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!isValidUsername(username) || !isValidPassword(password)) {
+    res.status(400).json({ error: 'Invalid username or password format.' });
+    return;
+  }
+  try {
+    const db = await getDb();
+    const existing = await all(db, 'SELECT id FROM users WHERE username = ?', [username.trim().toLowerCase()]);
+    if (existing.length) {
+      res.status(409).json({ error: 'Username already exists.' });
+      return;
+    }
+    const passwordHash = await hashPassword(password);
+    const result = await run(
+      db,
+      'INSERT INTO users (username, passwordHash, createdAt) VALUES (?, ?, ?)',
+      [username.trim().toLowerCase(), passwordHash, Date.now()]
+    );
+    const user = { id: result.lastID, username: username.trim().toLowerCase() };
+    const token = createToken(user);
+    res.status(201).json({ token, user, session: getTokenConfig() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (typeof username !== 'string' || typeof password !== 'string') {
+    res.status(400).json({ error: 'Missing credentials.' });
+    return;
+  }
+  try {
+    const db = await getDb();
+    const user = (await all(db, 'SELECT id, username, passwordHash FROM users WHERE username = ?', [username.trim().toLowerCase()]))[0];
+    if (!user) {
+      res.status(401).json({ error: 'Invalid credentials.' });
+      return;
+    }
+    const ok = await verifyPassword(password, user.passwordHash);
+    if (!ok) {
+      res.status(401).json({ error: 'Invalid credentials.' });
+      return;
+    }
+    const publicUser = { id: user.id, username: user.username };
+    const token = createToken(publicUser);
+    res.json({ token, user: publicUser, session: getTokenConfig() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/auth/me', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const user = (await all(db, 'SELECT id, username, createdAt FROM users WHERE id = ?', [req.user.id]))[0];
+    if (!user) {
+      res.status(404).json({ error: 'User not found.' });
+      return;
+    }
+    res.json({ user });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get('/api/photos', async (_req, res) => {
   try {
@@ -25,7 +94,7 @@ app.get('/api/photos', async (_req, res) => {
   }
 });
 
-app.post('/api/photos', async (req, res) => {
+app.post('/api/photos', requireAuth, async (req, res) => {
   const { clientId, createdAt, width, height, type, location, dataUrl } = req.body || {};
   if (!dataUrl || !createdAt) {
     res.status(400).json({ error: 'Missing photo payload.' });
@@ -34,9 +103,10 @@ app.post('/api/photos', async (req, res) => {
   try {
     const db = await getDb();
     const result = await run(db,
-      `INSERT INTO photos (clientId, createdAt, width, height, type, location, dataUrl)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        req.user.id,
         clientId ?? null,
         createdAt,
         width ?? null,
@@ -48,6 +118,7 @@ app.post('/api/photos', async (req, res) => {
     );
     const record = {
       id: result.lastID,
+      userId: req.user.id,
       clientId: clientId ?? null,
       createdAt,
       width: width ?? null,
@@ -87,9 +158,9 @@ app.get('/api/challenge/today', async (req, res) => {
 });
 
 // POST /api/challenge/:id/submit  → soumettre une photo pour un défi
-app.post('/api/challenge/:id/submit', async (req, res) => {
+app.post('/api/challenge/:id/submit', requireAuth, async (req, res) => {
   const challengeId = Number(req.params.id);
-  const { photoId, clientId, playerId } = req.body || {};
+  const { photoId } = req.body || {};
   if (!photoId) { res.status(400).json({ error: 'Missing photoId.' }); return; }
   try {
     const db = await getDb();
@@ -137,21 +208,23 @@ app.post('/api/challenge/:id/submit', async (req, res) => {
    //   return;
    // }
 
-    const playerKey = playerId ?? clientId ?? null;
-    if (playerKey) {
-      const existing = await all(db,
-        'SELECT COUNT(*) as count FROM submissions WHERE challengeId = ? AND playerId = ?',
-        [challengeId, playerKey]
-      );
-      if ((existing[0]?.count ?? 0) >= GAME_SETTINGS.maxPhotosPerDay) {
-        res.status(400).json({ error: 'Submission limit reached.' });
-        return;
-      }
+    if (photo.userId !== req.user.id) {
+      res.status(403).json({ error: 'Photo does not belong to current user.' });
+      return;
+    }
+
+    const existing = await all(db,
+      'SELECT COUNT(*) as count FROM submissions WHERE challengeId = ? AND userId = ?',
+      [challengeId, req.user.id]
+    );
+    if ((existing[0]?.count ?? 0) >= GAME_SETTINGS.maxPhotosPerDay) {
+      res.status(400).json({ error: 'Submission limit reached.' });
+      return;
     }
 
     const result = await run(db,
-      'INSERT INTO submissions (challengeId, photoId, clientId, playerId, createdAt) VALUES (?, ?, ?, ?, ?)',
-      [challengeId, photoId, clientId ?? null, playerKey, Date.now()]
+      'INSERT INTO submissions (challengeId, photoId, clientId, playerId, userId, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+      [challengeId, photoId, req.user.username, String(req.user.id), req.user.id, Date.now()]
     );
     res.json({ id: result.lastID });
   } catch (err) {
@@ -162,8 +235,8 @@ app.post('/api/challenge/:id/submit', async (req, res) => {
 // ── MINI-JEUX (GUESSES) ──────────────────────────────────────
 
 // POST /api/guess  → soumettre une réponse à un mini-jeu
-app.post('/api/guess', async (req, res) => {
-  const { photoId, clientId, type, payload } = req.body || {};
+app.post('/api/guess', requireAuth, async (req, res) => {
+  const { photoId, type, payload } = req.body || {};
   if (!photoId || !type || !payload) {
     res.status(400).json({ error: 'Missing fields.' }); return;
   }
@@ -174,8 +247,8 @@ app.post('/api/guess', async (req, res) => {
     const db = await getDb();
     const score = computeScore(type, payload, await getPhotoMeta(db, photoId));
     const result = await run(db,
-      'INSERT INTO guesses (photoId, clientId, type, payload, score, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
-      [photoId, clientId ?? null, type, JSON.stringify(payload), score, Date.now()]
+      'INSERT INTO guesses (photoId, clientId, userId, type, payload, score, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [photoId, req.user.username, req.user.id, type, JSON.stringify(payload), score, Date.now()]
     );
     res.json({ id: result.lastID, score });
   } catch (err) {
@@ -244,6 +317,16 @@ function safeJsonParse(value) {
   } catch {
     return null;
   }
+}
+
+function isValidUsername(value) {
+  if (typeof value !== 'string') return false;
+  const username = value.trim().toLowerCase();
+  return /^[a-z0-9_]{3,24}$/.test(username);
+}
+
+function isValidPassword(value) {
+  return typeof value === 'string' && value.length >= 8 && value.length <= 128;
 }
 
 function computeScore(type, payload, photo) {

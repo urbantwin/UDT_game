@@ -52,7 +52,7 @@ All the geolocated photos of the outside and inside of the campus that are captu
 | Pipeline for guessing and re-picture | 🔧 To be implemented |
 | Criteria to validate pictures | To be defined and implemented |
 | Easy config of the game | 🔧 To be designed |
-| Global storing system | 🔧 To be implemented |
+| Global soring system | 🔧 To be implemented |
 
  
 

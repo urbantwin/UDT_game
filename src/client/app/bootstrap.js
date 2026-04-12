@@ -7,12 +7,14 @@ import { createMapView } from '../map/map-view.js';
 import { createUserLocationLayer } from '../overlays/user-location-layer.js';
 import { createPhotoMarkersLayer } from '../overlays/photo-markers-layer.js';
 import { createTimeOverlay } from '../overlays/time-overlay.js';
+import { createAuthOverlay } from '../overlays/auth-overlay.js';
 import { createCameraController } from '../camera/camera-controller.js';
 import { createGalleryView } from '../gallery/gallery-view.js';
 import { startGeolocation } from '../services/geolocation.js';
 import { getAllPhotos } from '../services/photo-store.js';
 import { createPhotoSync } from '../services/photo-sync.js';
 import { getTodayChallenge, submitPhotoToChallenge } from '../services/challenge-api.js';
+import { restoreSession } from '../services/auth-api.js';
 import { createNotificationScheduler } from '../services/notification-scheduler.js';
 import { state } from './state.js';
 
@@ -25,20 +27,28 @@ export function bootstrapApp() {
   const userLocationLayer = createUserLocationLayer(mapView.map);
   const photoMarkersLayer = createPhotoMarkersLayer(mapView.map);
   const timeOverlay = createTimeOverlay(mapView.map);
+  const authOverlay = createAuthOverlay({
+    onAuthChange: (user) => {
+      state.player.id = user?.id ?? null;
+      state.player.name = user?.username ?? null;
+    }
+  });
   const galleryView = createGalleryView({
     onSubmit: async ({ photo }) => {
+      if (!state.player.id) {
+        throw new Error('Login required');
+      }
       const challenge = await getTodayChallenge();
       let remoteId = photo.remoteId ?? null;
       if (!remoteId) {
         remoteId = await photoSync.uploadPhoto(photo);
       }
       if (!remoteId) {
-        throw new Error('Photo not synced yet.');
+        throw new Error('Photo sync failed');
       }
       await submitPhotoToChallenge({
         challengeId: challenge.id,
-        photoId: remoteId,
-        playerId: state.player?.id ?? photo.clientId ?? null
+        photoId: remoteId
       });
     }
   });
@@ -52,9 +62,21 @@ export function bootstrapApp() {
     onPhotoSaved: (photo) => {
       photoMarkersLayer.addPhoto(photo);
       galleryView.addPhoto(photo);
-      photoSync.uploadPhoto(photo);
+      if (state.player.id) {
+        photoSync.uploadPhoto(photo);
+      }
     }
   });
+
+  restoreSession()
+    .then((user) => {
+      state.player.id = user?.id ?? null;
+      state.player.name = user?.username ?? null;
+      authOverlay.setUser(user);
+    })
+    .catch((error) => {
+      console.warn('Failed to restore session:', error);
+    });
 
   getAllPhotos()
     .then((photos) => {
@@ -110,6 +132,7 @@ export function bootstrapApp() {
     userLocationLayer.remove();
     photoMarkersLayer.remove();
     timeOverlay.remove();
+    authOverlay.remove();
     galleryView.remove();
     photoSync.close();
     cameraController.remove();

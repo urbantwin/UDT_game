@@ -1,5 +1,7 @@
 // Challenge API helpers (REST).
 
+import { authHeaders } from './auth-api.js';
+
 function getApiBase() {
   if (import.meta.env.DEV) {
     return `http://${location.hostname}:3001`;
@@ -13,12 +15,12 @@ export async function getTodayChallenge() {
   return await res.json();
 }
 
-export async function submitPhotoToChallenge({ challengeId, photoId, playerId } = {}) {
+export async function submitPhotoToChallenge({ challengeId, photoId } = {}) {
   if (!challengeId || !photoId) throw new Error('Missing challengeId or photoId.');
   const res = await fetch(`${getApiBase()}/api/challenge/${challengeId}/submit`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ photoId, playerId })
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ photoId })
   });
   const data = await res.json();
   if (!res.ok) {
