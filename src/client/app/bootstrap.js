@@ -10,6 +10,7 @@ import { createTimeOverlay } from '../overlays/time-overlay.js';
 import { createAuthOverlay } from '../overlays/auth-overlay.js';
 import { createCameraController } from '../camera/camera-controller.js';
 import { createGalleryView } from '../gallery/gallery-view.js';
+import { createAdminGalleryView } from '../gallery/admin-gallery-view.js';
 import { startGeolocation } from '../services/geolocation.js';
 import { getAllPhotos } from '../services/photo-store.js';
 import { createPhotoSync } from '../services/photo-sync.js';
@@ -27,10 +28,16 @@ export function bootstrapApp() {
   const userLocationLayer = createUserLocationLayer(mapView.map);
   const photoMarkersLayer = createPhotoMarkersLayer(mapView.map);
   const timeOverlay = createTimeOverlay(mapView.map);
+  const adminGalleryView = createAdminGalleryView();
   const authOverlay = createAuthOverlay({
     onAuthChange: (user) => {
       state.player.id = user?.id ?? null;
       state.player.name = user?.username ?? null;
+      const isDev = user?.username === 'dev';
+      adminGalleryView.setVisible(isDev);
+      if (isDev) {
+        adminGalleryView.refresh();
+      }
     }
   });
   const galleryView = createGalleryView({
@@ -73,6 +80,11 @@ export function bootstrapApp() {
       state.player.id = user?.id ?? null;
       state.player.name = user?.username ?? null;
       authOverlay.setUser(user);
+      const isDev = user?.username === 'dev';
+      adminGalleryView.setVisible(isDev);
+      if (isDev) {
+        adminGalleryView.refresh();
+      }
     })
     .catch((error) => {
       console.warn('Failed to restore session:', error);
@@ -133,6 +145,7 @@ export function bootstrapApp() {
     photoMarkersLayer.remove();
     timeOverlay.remove();
     authOverlay.remove();
+    adminGalleryView.remove();
     galleryView.remove();
     photoSync.close();
     cameraController.remove();

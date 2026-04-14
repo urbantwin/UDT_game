@@ -13,11 +13,23 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '15mb' }));
 
+function requireDevAccess(req, res, next) {
+  if (req.user?.username !== 'dev') {
+    res.status(403).json({ error: 'Admin access denied.' });
+    return;
+  }
+  next();
+}
+
 // ---- AUTH ----
 app.post('/api/auth/register', async (req, res) => {
   const { username, password } = req.body || {};
   if (!isValidUsername(username) || !isValidPassword(password)) {
     res.status(400).json({ error: 'Invalid username or password format.' });
+    return;
+  }
+  if (username.trim().toLowerCase() === 'dev') {
+    res.status(403).json({ error: 'Reserved username.' });
     return;
   }
   try {
@@ -76,6 +88,115 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
       return;
     }
     res.json({ user });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---- ADMIN (dev-only) ----
+app.get('/api/admin/submissions', requireAuth, requireDevAccess, async (_req, res) => {
+  try {
+    const db = await getDb();
+    const rows = await all(
+      db,
+      `SELECT
+        s.id AS submissionId,
+        s.challengeId,
+        s.photoId,
+        s.userId AS submitterUserId,
+        s.reviewStatus,
+        s.reviewedBy,
+        s.reviewedAt,
+        s.reviewNote,
+        s.createdAt AS submittedAt,
+        c.date AS challengeDate,
+        c.locationId AS challengeLocationId,
+        p.clientId,
+        p.createdAt AS photoCreatedAt,
+        p.width,
+        p.height,
+        p.type,
+        p.location,
+        p.dataUrl,
+        u.username AS submitterUsername,
+        reviewer.username AS reviewedByUsername
+      FROM submissions s
+      JOIN photos p ON p.id = s.photoId
+      LEFT JOIN challenges c ON c.id = s.challengeId
+      LEFT JOIN users u ON u.id = s.userId
+      LEFT JOIN users reviewer ON reviewer.id = s.reviewedBy
+      ORDER BY s.createdAt DESC`
+    );
+
+    res.json(
+      rows.map((row) => ({
+        ...row,
+        location: safeJsonParse(row.location)
+      }))
+    );
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/submissions/:id/review', requireAuth, requireDevAccess, async (req, res) => {
+  const submissionId = Number(req.params.id);
+  const { action, note } = req.body || {};
+  const normalizedAction = String(action || '').toLowerCase();
+  if (!Number.isInteger(submissionId) || submissionId <= 0) {
+    res.status(400).json({ error: 'Invalid submission id.' });
+    return;
+  }
+  if (!['validate', 'discard'].includes(normalizedAction)) {
+    res.status(400).json({ error: 'Action must be validate or discard.' });
+    return;
+  }
+
+  const nextStatus = normalizedAction === 'validate' ? 'validated' : 'discarded';
+  const reviewNote = typeof note === 'string' && note.trim() ? note.trim().slice(0, 500) : null;
+
+  try {
+    const db = await getDb();
+    const existing = await all(
+      db,
+      'SELECT id, reviewStatus FROM submissions WHERE id = ?',
+      [submissionId]
+    );
+    if (!existing.length) {
+      res.status(404).json({ error: 'Submission not found.' });
+      return;
+    }
+
+    const result = await run(
+      db,
+      `UPDATE submissions
+       SET reviewStatus = ?, reviewedBy = ?, reviewedAt = ?, reviewNote = ?
+       WHERE id = ?`,
+      [nextStatus, req.user.id, Date.now(), reviewNote, submissionId]
+    );
+    if (result.changes === 0) {
+      res.status(404).json({ error: 'Submission not found.' });
+      return;
+    }
+
+    const row = (
+      await all(
+        db,
+        `SELECT
+          s.id AS submissionId,
+          s.reviewStatus,
+          s.reviewedBy,
+          s.reviewedAt,
+          s.reviewNote,
+          u.username AS reviewedByUsername
+         FROM submissions s
+         LEFT JOIN users u ON u.id = s.reviewedBy
+         WHERE s.id = ?`,
+        [submissionId]
+      )
+    )[0];
+
+    res.json(row);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

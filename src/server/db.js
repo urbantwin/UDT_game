@@ -1,6 +1,7 @@
 ﻿import sqlite3 from 'sqlite3';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { hashPassword } from './auth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = join(__dirname, '../../data/photos.db');
@@ -40,60 +41,85 @@ export async function getDb() {
     dataUrl   TEXT    NOT NULL
   )`);
 
-  // DÃ©fis journaliers : un lieu cible par jour
+  // Defis journaliers : un lieu cible par jour
   await run(_db, `CREATE TABLE IF NOT EXISTS challenges (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    date       TEXT    NOT NULL UNIQUE,  -- YYYY-MM-DD
-    locationId TEXT    NOT NULL,         -- id dans epfl-locations.js
+    date       TEXT    NOT NULL UNIQUE,
+    locationId TEXT    NOT NULL,
     createdAt  INTEGER NOT NULL
   )`);
 
-  // Soumissions : photos liées à un défi
+  // Soumissions : photos liees a un defi
   await run(_db, `CREATE TABLE IF NOT EXISTS submissions (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    challengeId INTEGER NOT NULL REFERENCES challenges(id),
-    photoId     INTEGER NOT NULL REFERENCES photos(id),
-    clientId    TEXT,
-    playerId    TEXT,
-    userId      INTEGER REFERENCES users(id),
-    createdAt   INTEGER NOT NULL
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    challengeId  INTEGER NOT NULL REFERENCES challenges(id),
+    photoId      INTEGER NOT NULL REFERENCES photos(id),
+    clientId     TEXT,
+    playerId     TEXT,
+    userId       INTEGER REFERENCES users(id),
+    reviewStatus TEXT    NOT NULL DEFAULT 'pending',
+    reviewedBy   INTEGER REFERENCES users(id),
+    reviewedAt   INTEGER,
+    reviewNote   TEXT,
+    createdAt    INTEGER NOT NULL
   )`);
 
-  // Migration douce : ajoute playerId si la table existait déjà
+  // Migrations souples pour les anciennes bases
   try {
     await run(_db, 'ALTER TABLE submissions ADD COLUMN playerId TEXT');
-  } catch {
-    // Ignore si la colonne existe déjà
-  }
+  } catch {}
   try {
     await run(_db, 'ALTER TABLE submissions ADD COLUMN userId INTEGER REFERENCES users(id)');
-  } catch {
-    // Ignore si la colonne existe déjà
-  }
+  } catch {}
+  try {
+    await run(_db, "ALTER TABLE submissions ADD COLUMN reviewStatus TEXT NOT NULL DEFAULT 'pending'");
+  } catch {}
+  try {
+    await run(_db, 'ALTER TABLE submissions ADD COLUMN reviewedBy INTEGER REFERENCES users(id)');
+  } catch {}
+  try {
+    await run(_db, 'ALTER TABLE submissions ADD COLUMN reviewedAt INTEGER');
+  } catch {}
+  try {
+    await run(_db, 'ALTER TABLE submissions ADD COLUMN reviewNote TEXT');
+  } catch {}
   try {
     await run(_db, 'ALTER TABLE photos ADD COLUMN userId INTEGER REFERENCES users(id)');
-  } catch {
-    // Ignore si la colonne existe déjà
-  }
+  } catch {}
 
-  // RÃ©ponses des joueurs aux mini-jeux
+  // Reponses des joueurs aux mini-jeux
   await run(_db, `CREATE TABLE IF NOT EXISTS guesses (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     photoId     INTEGER NOT NULL REFERENCES photos(id),
     clientId    TEXT,
     userId      INTEGER REFERENCES users(id),
-    type        TEXT    NOT NULL,  -- 'geo-pin' | 'time-guess' | 're-photo'
-    payload     TEXT    NOT NULL,  -- JSON de la rÃ©ponse
+    type        TEXT    NOT NULL,
+    payload     TEXT    NOT NULL,
     score       INTEGER,
     createdAt   INTEGER NOT NULL
   )`);
   try {
     await run(_db, 'ALTER TABLE guesses ADD COLUMN userId INTEGER REFERENCES users(id)');
-  } catch {
-    // Ignore si la colonne existe déjà
-  }
+  } catch {}
+
+  await ensureDevAccount(_db);
 
   return _db;
+}
+
+async function ensureDevAccount(db) {
+  const username = 'dev';
+  const passwordHash = await hashPassword('12345678');
+  const rows = await all(db, 'SELECT id FROM users WHERE username = ?', [username]);
+  if (rows.length === 0) {
+    await run(
+      db,
+      'INSERT INTO users (username, passwordHash, createdAt) VALUES (?, ?, ?)',
+      [username, passwordHash, Date.now()]
+    );
+    return;
+  }
+  await run(db, 'UPDATE users SET passwordHash = ? WHERE username = ?', [passwordHash, username]);
 }
 
 export function run(db, sql, params = []) {
@@ -113,5 +139,3 @@ export function all(db, sql, params = []) {
     });
   });
 }
-
-
