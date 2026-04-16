@@ -49,6 +49,17 @@ export async function getDb() {
     createdAt  INTEGER NOT NULL
   )`);
 
+  // Challenge requests already seen by each player.
+  // Unique (userId, photoId) ensures the same photo is never served twice to a player.
+  await run(_db, `CREATE TABLE IF NOT EXISTS challenge_views (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId     INTEGER NOT NULL REFERENCES users(id),
+    photoId    INTEGER NOT NULL REFERENCES photos(id),
+    servedDate TEXT    NOT NULL,
+    createdAt  INTEGER NOT NULL,
+    UNIQUE(userId, photoId)
+  )`);
+
   // Soumissions : photos liees a un defi
   await run(_db, `CREATE TABLE IF NOT EXISTS submissions (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -15,6 +15,18 @@ export async function getTodayChallenge() {
   return await res.json();
 }
 
+export async function requestChallengePhoto() {
+  const res = await fetch(`${getApiBase()}/api/challenge/request`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() }
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data?.error || 'Failed to get challenge.');
+  }
+  return data;
+}
+
 export async function submitPhotoToChallenge({ challengeId, photoId } = {}) {
   if (!challengeId || !photoId) throw new Error('Missing challengeId or photoId.');
   const res = await fetch(`${getApiBase()}/api/challenge/${challengeId}/submit`, {

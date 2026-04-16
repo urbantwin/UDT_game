@@ -8,13 +8,14 @@ import { createUserLocationLayer } from '../overlays/user-location-layer.js';
 import { createPhotoMarkersLayer } from '../overlays/photo-markers-layer.js';
 import { createTimeOverlay } from '../overlays/time-overlay.js';
 import { createAuthOverlay } from '../overlays/auth-overlay.js';
+import { createChallengeOverlay } from '../overlays/challenge-overlay.js';
 import { createCameraController } from '../camera/camera-controller.js';
 import { createGalleryView } from '../gallery/gallery-view.js';
 import { createAdminGalleryView } from '../gallery/admin-gallery-view.js';
 import { startGeolocation } from '../services/geolocation.js';
 import { getAllPhotos } from '../services/photo-store.js';
 import { createPhotoSync } from '../services/photo-sync.js';
-import { getTodayChallenge, submitPhotoToChallenge } from '../services/challenge-api.js';
+import { getTodayChallenge, submitPhotoToChallenge, requestChallengePhoto } from '../services/challenge-api.js';
 import { restoreSession } from '../services/auth-api.js';
 import { createNotificationScheduler } from '../services/notification-scheduler.js';
 import { state } from './state.js';
@@ -28,6 +29,14 @@ export function bootstrapApp() {
   const userLocationLayer = createUserLocationLayer(mapView.map);
   const photoMarkersLayer = createPhotoMarkersLayer(mapView.map);
   const timeOverlay = createTimeOverlay(mapView.map);
+  const challengeOverlay = createChallengeOverlay({
+    onRequest: async () => {
+      if (!state.player.id) {
+        throw new Error('Login required');
+      }
+      return await requestChallengePhoto();
+    }
+  });
   const adminGalleryView = createAdminGalleryView();
   const authOverlay = createAuthOverlay({
     onAuthChange: (user) => {
@@ -144,6 +153,7 @@ export function bootstrapApp() {
     userLocationLayer.remove();
     photoMarkersLayer.remove();
     timeOverlay.remove();
+    challengeOverlay.remove();
     authOverlay.remove();
     adminGalleryView.remove();
     galleryView.remove();

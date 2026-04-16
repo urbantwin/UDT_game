@@ -1,10 +1,10 @@
-import express from 'express';
+﻿import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import { getDb, run, all } from './db.js';
 import { hashPassword, verifyPassword, createToken, requireAuth, getTokenConfig } from './auth.js';
-import { GAME_SETTINGS, SUBMISSION_WINDOW, getTodayLocation } from '../../game/game-config.js';
+import { CHALLENGE_WINDOW, GAME_SETTINGS, SUBMISSION_WINDOW, getTodayLocation } from '../../game/game-config.js';
 import { getLocationById } from '../../game/epfl-locations.js';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
@@ -255,16 +255,51 @@ app.post('/api/photos', requireAuth, async (req, res) => {
   }
 });
 
-// ── CHALLENGES ──────────────────────────────────────────────
+// â”€â”€ CHALLENGES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// GET /api/challenge/today  → défi du jour (créé si inexistant)
+// GET /api/challenge/today  â†’ dÃ©fi du jour (crÃ©Ã© si inexistant)
+// POST /api/challenge/request -> give one challenge photo to the current player.
+// Rules:
+// - only between 12:00 and 23:59
+// - only validated photos
+// - prioritize today, then up to 4 days before
+// - exclude already seen photos for this player
+// - exclude photos submitted by this player
+app.post('/api/challenge/request', requireAuth, async (req, res) => {
+  const now = new Date();
+  if (!isChallengeRequestWindow(now)) {
+    res.status(400).json({ error: 'Challenge is only available between 12:00 and 23:59.' });
+    return;
+  }
+
+  try {
+    const db = await getDb();
+    const candidate = await pickChallengePhotoForUser(db, req.user.id, now);
+    if (!candidate) {
+      res.status(404).json({ error: 'No eligible challenge photo found.' });
+      return;
+    }
+
+    // Record as seen for this player before returning it.
+    await run(
+      db,
+      'INSERT INTO challenge_views (userId, photoId, servedDate, createdAt) VALUES (?, ?, ?, ?)',
+      [req.user.id, candidate.id, formatLocalDate(now), Date.now()]
+    );
+
+    res.json({ photoId: candidate.id, dataUrl: candidate.dataUrl });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/challenge/today', async (req, res) => {
   try {
     const db = await getDb();
     const today = formatLocalDate(new Date());
     let challenge = (await all(db, 'SELECT * FROM challenges WHERE date = ?', [today]))[0];
     if (!challenge) {
-      // Le locationId par défaut ; le client peut surcharger via game-config.js
+      // Le locationId par dÃ©faut ; le client peut surcharger via game-config.js
       const defaultLocationId = req.query.locationId ?? 'rolex';
       const result = await run(db,
         'INSERT INTO challenges (date, locationId, createdAt) VALUES (?, ?, ?)',
@@ -278,7 +313,7 @@ app.get('/api/challenge/today', async (req, res) => {
   }
 });
 
-// POST /api/challenge/:id/submit  → soumettre une photo pour un défi
+// POST /api/challenge/:id/submit  â†’ soumettre une photo pour un dÃ©fi
 app.post('/api/challenge/:id/submit', requireAuth, async (req, res) => {
   const challengeId = Number(req.params.id);
   const { photoId } = req.body || {};
@@ -353,9 +388,9 @@ app.post('/api/challenge/:id/submit', requireAuth, async (req, res) => {
   }
 });
 
-// ── MINI-JEUX (GUESSES) ──────────────────────────────────────
+// â”€â”€ MINI-JEUX (GUESSES) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// POST /api/guess  → soumettre une réponse à un mini-jeu
+// POST /api/guess  â†’ soumettre une rÃ©ponse Ã  un mini-jeu
 app.post('/api/guess', requireAuth, async (req, res) => {
   const { photoId, type, payload } = req.body || {};
   if (!photoId || !type || !payload) {
@@ -377,7 +412,7 @@ app.post('/api/guess', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/guess/:photoId  → scores existants pour une photo
+// GET /api/guess/:photoId  â†’ scores existants pour une photo
 app.get('/api/guess/:photoId', async (req, res) => {
   try {
     const db = await getDb();
@@ -391,7 +426,7 @@ app.get('/api/guess/:photoId', async (req, res) => {
   }
 });
 
-// ── HELPERS ─────────────────────────────────────────────────
+// â”€â”€ HELPERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function getPhotoMeta(db, photoId) {
   return (await all(db, 'SELECT createdAt, location FROM photos WHERE id = ?', [photoId]))[0] ?? null;
@@ -405,14 +440,69 @@ async function getChallengeById(db, challengeId) {
   return (await all(db, 'SELECT * FROM challenges WHERE id = ?', [challengeId]))[0] ?? null;
 }
 
+async function pickChallengePhotoForUser(db, userId, now = new Date()) {
+  const servedToday = await all(
+    db,
+    'SELECT photoId, COUNT(*) as count FROM challenge_views WHERE servedDate = ? GROUP BY photoId',
+    [formatLocalDate(now)]
+  );
+  const servedTodayCount = new Map(servedToday.map((row) => [row.photoId, Number(row.count) || 0]));
+
+  for (let dayOffset = 0; dayOffset <= 4; dayOffset += 1) {
+    const { startMs, endMs } = getLocalDayRange(now, dayOffset);
+    const rows = await all(
+      db,
+      `SELECT DISTINCT p.id, p.dataUrl, p.createdAt
+       FROM photos p
+       JOIN submissions s ON s.photoId = p.id AND s.reviewStatus = 'validated'
+       WHERE p.createdAt BETWEEN ? AND ?
+         AND (p.userId IS NULL OR p.userId != ?)
+         AND NOT EXISTS (
+           SELECT 1 FROM challenge_views v WHERE v.userId = ? AND v.photoId = p.id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM submissions own WHERE own.userId = ? AND own.photoId = p.id
+         )`,
+      [startMs, endMs, userId, userId, userId]
+    );
+
+    if (!rows.length) continue;
+
+    const minAssignments = Math.min(
+      ...rows.map((row) => servedTodayCount.get(row.id) ?? 0)
+    );
+    const pool = rows.filter((row) => (servedTodayCount.get(row.id) ?? 0) === minAssignments);
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  return null;
+}
+
+function getLocalDayRange(now, dayOffset) {
+  const day = new Date(now);
+  day.setHours(0, 0, 0, 0);
+  day.setDate(day.getDate() - dayOffset);
+  const startMs = day.getTime();
+  const endMs = startMs + (24 * 60 * 60 * 1000) - 1;
+  return { startMs, endMs };
+}
+
+function isChallengeRequestWindow(now = new Date()) {
+  return isWithinWindow(CHALLENGE_WINDOW, now);
+}
+
 function isSameDay(date, dateStr) {
   if (!(date instanceof Date)) return false;
   return formatLocalDate(date) === dateStr;
 }
 
 function isWithinSubmissionWindow(dateStr, now = new Date()) {
-  const start = SUBMISSION_WINDOW?.start ?? { hour: 0, minute: 0 };
-  const end = SUBMISSION_WINDOW?.end ?? { hour: 23, minute: 59 };
+  return isWithinWindow(SUBMISSION_WINDOW, now);
+}
+
+function isWithinWindow(windowConfig, now = new Date()) {
+  const start = windowConfig?.start ?? { hour: 0, minute: 0 };
+  const end = windowConfig?.end ?? { hour: 23, minute: 59 };
   const toMinutes = (t) => t.hour * 60 + t.minute;
   const startMin = toMinutes(start);
   const endMin = toMinutes(end);
@@ -458,7 +548,7 @@ function computeScore(type, payload, photo) {
     const guessMinutes = payload.hour * 60 + payload.minute;
     const realMinutes  = real.getHours() * 60 + real.getMinutes();
     const diff = Math.abs(guessMinutes - realMinutes);
-    // 0–5 min → 500 pts, 120+ min → 0 pts
+    // 0â€“5 min â†’ 500 pts, 120+ min â†’ 0 pts
     return Math.max(0, Math.round(500 * (1 - diff / 120)));
   }
   if (type === 'geo-pin') {
@@ -466,10 +556,10 @@ function computeScore(type, payload, photo) {
     const loc = photo.location ? JSON.parse(photo.location) : null;
     if (!loc) return 0;
     const dist = haversineMeters(loc.lat, loc.lon ?? loc.lng, payload.lat, payload.lng);
-    // 0–10 m → 1000 pts, 500+ m → 0 pts
+    // 0â€“10 m â†’ 1000 pts, 500+ m â†’ 0 pts
     return Math.max(0, Math.round(1000 * (1 - dist / 500)));
   }
-  // re-photo : validé par présence (score fixe = 300)
+  // re-photo : validÃ© par prÃ©sence (score fixe = 300)
   return 300;
 }
 
@@ -482,7 +572,7 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// ── WEBSOCKET & SERVER ───────────────────────────────────────
+// â”€â”€ WEBSOCKET & SERVER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
@@ -499,3 +589,4 @@ function broadcast(message) {
 server.listen(PORT, () => {
   console.log(`Photo sync server listening on http://localhost:${PORT}`);
 });
+
