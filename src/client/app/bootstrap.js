@@ -1,6 +1,4 @@
-﻿// Initialisation de l'application â€” cÃ¢blage Leaflet + gÃ©olocalisation + state.
-// Multiplayer note:
-// - Wire a real-time gallery service here (WebSocket/SSE) to keep photos in sync.
+// Initialisation de l'application — câblage Leaflet + géolocalisation + state.
 
 import { mapConfig } from '../map/map-config.js';
 import { createMapView } from '../map/map-view.js';
@@ -8,6 +6,7 @@ import { createUserLocationLayer } from '../overlays/user-location-layer.js';
 import { createPhotoMarkersLayer } from '../overlays/photo-markers-layer.js';
 import { createTimeOverlay } from '../overlays/time-overlay.js';
 import { createAuthOverlay } from '../overlays/auth-overlay.js';
+import { createSettingsOverlay } from '../overlays/settings-overlay.js';
 import { createChallengeOverlay } from '../overlays/challenge-overlay.js';
 import { createCameraController } from '../camera/camera-controller.js';
 import { createGalleryView } from '../gallery/gallery-view.js';
@@ -15,136 +14,153 @@ import { createAdminGalleryView } from '../gallery/admin-gallery-view.js';
 import { startGeolocation } from '../services/geolocation.js';
 import { getAllPhotos } from '../services/photo-store.js';
 import { createPhotoSync } from '../services/photo-sync.js';
-import { getTodayChallenge, submitPhotoToChallenge, requestChallengePhoto } from '../services/challenge-api.js';
+import { requestChallengePhoto, contributePhoto, respondToChallenge } from '../services/challenge-api.js';
 import { restoreSession } from '../services/auth-api.js';
 import { createNotificationScheduler } from '../services/notification-scheduler.js';
+import { createNotificationsOverlay } from '../overlays/notifications-overlay.js';
 import { state } from './state.js';
 
 export function bootstrapApp() {
   const mapView = createMapView({ containerId: 'map', config: mapConfig });
-
-  // Expose l'instance Leaflet dans le state global
   state.map = mapView.map;
 
-  const userLocationLayer = createUserLocationLayer(mapView.map);
-  const photoMarkersLayer = createPhotoMarkersLayer(mapView.map);
-  const timeOverlay = createTimeOverlay(mapView.map);
-  const challengeOverlay = createChallengeOverlay({
-    onRequest: async () => {
-      if (!state.player.id) {
-        throw new Error('Login required');
-      }
-      return await requestChallengePhoto();
-    }
-  });
-  const adminGalleryView = createAdminGalleryView();
-  const authOverlay = createAuthOverlay({
-    onAuthChange: (user) => {
-      state.player.id = user?.id ?? null;
-      state.player.name = user?.username ?? null;
-      const isDev = user?.username === 'dev';
-      adminGalleryView.setVisible(isDev);
-      if (isDev) {
-        adminGalleryView.refresh();
-      }
-    }
-  });
-  const galleryView = createGalleryView({
-    onSubmit: async ({ photo }) => {
-      if (!state.player.id) {
-        throw new Error('Login required');
-      }
-      const challenge = await getTodayChallenge();
-      let remoteId = photo.remoteId ?? null;
-      if (!remoteId) {
-        remoteId = await photoSync.uploadPhoto(photo);
-      }
-      if (!remoteId) {
-        throw new Error('Photo sync failed');
-      }
-      await submitPhotoToChallenge({
-        challengeId: challenge.id,
-        photoId: remoteId
-      });
-    }
-  });
-  const photoSync = createPhotoSync({
-    onRemotePhoto: (photo) => {
-      photoMarkersLayer.addPhoto(photo);
-      galleryView.addPhoto(photo);
-    }
-  });
-  const cameraController = createCameraController({
-    onPhotoSaved: (photo) => {
-      photoMarkersLayer.addPhoto(photo);
-      galleryView.addPhoto(photo);
-      if (state.player.id) {
-        photoSync.uploadPhoto(photo);
-      }
-    }
+  const userLocationLayer    = createUserLocationLayer(mapView.map);
+  const photoMarkersLayer    = createPhotoMarkersLayer(mapView.map);
+  const adminGalleryView     = createAdminGalleryView();
+  const notificationsOverlay = createNotificationsOverlay();
+
+  // ── Time overlay (top-left) ──────────────────────────────────────────────
+  const timeOverlay = createTimeOverlay();
+
+  // ── Auth compact display (top-right) ────────────────────────────────────
+  const authOverlay = createAuthOverlay();
+
+  // ── ID de la photo challenge en cours (mode réponse) ────────────────────
+  // null  → prochaine photo prise = contribution (Bucket 1)
+  // <id>  → prochaine photo prise = réponse au challenge (Bucket 3)
+  let pendingChallengePhotoId = null;
+
+  // ── Notification scheduler ───────────────────────────────────────────────
+  const scheduler = createNotificationScheduler({
+    scheduledTimes: [{ hour: 15, minute: 20 }],
+    onTrigger: () => {
+      timeOverlay.startTimer(60);
+      cameraController.open();
+    },
   });
 
-  restoreSession()
-    .then((user) => {
-      state.player.id = user?.id ?? null;
+  // ── Settings overlay (dropdown under ⚙️) ────────────────────────────────
+  const settingsOverlay = createSettingsOverlay({
+    onAuthChange: (user) => {
+      state.player.id   = user?.id       ?? null;
       state.player.name = user?.username ?? null;
       authOverlay.setUser(user);
       const isDev = user?.username === 'dev';
       adminGalleryView.setVisible(isDev);
-      if (isDev) {
-        adminGalleryView.refresh();
-      }
-    })
-    .catch((error) => {
-      console.warn('Failed to restore session:', error);
-    });
+      if (isDev) adminGalleryView.refresh();
+      notificationsOverlay.setLoggedIn(Boolean(user));
+    },
+    onOpenGallery: () => galleryView.open(),
+    onEnableNotifs: (callback) => scheduler.enableNotifications(callback),
+    onDisableNotifs: () => {},
+    onTestNotif: () => scheduler.testFire(),
+  });
 
+  timeOverlay.onSettingsClick(() => settingsOverlay.toggle());
+
+  // ── Challenge overlay ────────────────────────────────────────────────────
+  const challengeOverlay = createChallengeOverlay({
+    onRequest: async () => {
+      if (!state.player.id) throw new Error('Connexion requise.');
+      return await requestChallengePhoto();
+    },
+    onGoRespond: (challengePhotoId) => {
+      pendingChallengePhotoId = challengePhotoId;
+      cameraController.open();
+    },
+  });
+
+  // ── Gallery (photos locales) ─────────────────────────────────────────────
+  const galleryView = createGalleryView({
+    onSubmit: async ({ photo }) => {
+      if (!state.player.id) throw new Error('Connexion requise.');
+      await contributePhoto(photo);
+    },
+  });
+
+  // ── Photo sync (WebSocket + REST) ────────────────────────────────────────
+  const photoSync = createPhotoSync({
+    onRemotePhoto: (photo) => {
+      photoMarkersLayer.addPhoto(photo);
+      galleryView.addPhoto(photo);
+    },
+  });
+
+  // ── Camera controller ────────────────────────────────────────────────────
+  const cameraController = createCameraController({
+    onPhotoSaved: async (photo) => {
+      // Affichage local immédiat
+      photoMarkersLayer.addPhoto(photo);
+      galleryView.addPhoto(photo);
+
+      if (!state.player.id) return;
+
+      if (pendingChallengePhotoId) {
+        // ── Mode réponse → Bucket 3 ──────────────────────────────────────
+        const cpid = pendingChallengePhotoId;
+        pendingChallengePhotoId = null;
+        try {
+          await respondToChallenge({ photo, challengePhotoId: cpid });
+        } catch (err) {
+          console.warn('[challenge] Réponse échouée:', err.message);
+        }
+      } else {
+        // ── Mode contribution → Bucket 1 ─────────────────────────────────
+        try {
+          await contributePhoto(photo);
+        } catch (err) {
+          // Fallback si pas de GPS : tenter le sync générique
+          console.warn('[challenge] Contribution échouée (GPS?):', err.message);
+          photoSync.uploadPhoto(photo);
+        }
+      }
+    },
+  });
+
+  // ── Restore session ──────────────────────────────────────────────────────
+  restoreSession()
+    .then((user) => {
+      state.player.id   = user?.id       ?? null;
+      state.player.name = user?.username ?? null;
+      authOverlay.setUser(user);
+      settingsOverlay.setUser(user);
+      const isDev = user?.username === 'dev';
+      adminGalleryView.setVisible(isDev);
+      if (isDev) adminGalleryView.refresh();
+      notificationsOverlay.setLoggedIn(Boolean(user));
+    })
+    .catch((err) => console.warn('Failed to restore session:', err));
+
+  // ── Charger les photos locales et distantes ───────────────────────────────
   getAllPhotos()
     .then((photos) => {
       photoMarkersLayer.setPhotos(photos);
       galleryView.setPhotos(photos);
       return photoSync.loadRemotePhotos();
     })
-    .catch((error) => {
-      console.warn('Failed to load photos:', error);
-    });
+    .catch((err) => console.warn('Failed to load photos:', err));
 
-  // Le scheduler programme le dÃ©clenchement dÃ¨s la crÃ©ation.
-  // Le timer et la camÃ©ra se lancent automatiquement Ã  l'heure â€” pas besoin de clic.
-  // "Activer notifs" ne sert qu'Ã  autoriser la popup de notification systÃ¨me.
-  const scheduler = createNotificationScheduler({
-    scheduledTimes: [{ hour: 15, minute: 20 }],
-    onTrigger: () => {
-      timeOverlay.startTimer(60);
-      cameraController.open();
-    }
-  });
-
-  timeOverlay.onEnableNotifs((callback) => {
-    scheduler.enableNotifications(callback);
-  });
-
-  timeOverlay.onDisableNotifs(() => {
-    // La permission navigateur ne peut pas Ãªtre rÃ©voquÃ©e par JS,
-    // mais on ne montrera plus la popup systÃ¨me lors du prochain dÃ©clenchement.
-  });
-
-  timeOverlay.onTestNotif(() => {
-    scheduler.testFire();
-  });
-
+  // ── Géolocalisation ──────────────────────────────────────────────────────
   const stopGeolocation = startGeolocation({
     onUpdate: (location) => {
       state.userLocation = location;
       userLocationLayer.setLocation(location);
-
-      // Premier fix GPS : recentre la carte sur le joueur
       if (!state.initialPositionSet) {
         mapView.panTo(location.lat, location.lon);
         state.initialPositionSet = true;
       }
     },
-    onError: (error) => console.warn('Geolocation error:', error)
+    onError: (err) => console.warn('Geolocation error:', err),
   });
 
   return function teardown() {
@@ -155,10 +171,12 @@ export function bootstrapApp() {
     timeOverlay.remove();
     challengeOverlay.remove();
     authOverlay.remove();
+    settingsOverlay.remove();
     adminGalleryView.remove();
     galleryView.remove();
     photoSync.close();
     cameraController.remove();
+    notificationsOverlay.remove();
     mapView.map.remove();
   };
 }

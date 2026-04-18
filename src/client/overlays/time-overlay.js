@@ -1,8 +1,5 @@
-// Leaflet overlay that displays the current time (hh:mm:ss).
-
-import L from 'leaflet';
-
-const NOTIFS_KEY = 'udt-notifs-enabled';
+// Overlay horloge fixe (top-left) avec bouton paramètres ⚙️.
+// Plus de dépendance Leaflet.
 
 function formatTime(date) {
   return date.toLocaleTimeString('en-GB', { hour12: false });
@@ -15,141 +12,69 @@ function formatCountdown(seconds) {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-function makeButton(text, bg) {
-  const btn = L.DomUtil.create('button');
-  btn.type = 'button';
-  btn.textContent = text;
-  btn.style.background = bg;
-  btn.style.color = '#111827';
-  btn.style.border = 'none';
-  btn.style.borderRadius = '6px';
-  btn.style.padding = '6px 8px';
-  btn.style.cursor = 'pointer';
-  btn.style.font = '12px system-ui, sans-serif';
-  return btn;
-}
+export function createTimeOverlay({ container = document.body } = {}) {
+  const root = document.createElement('div');
+  root.style.cssText = `
+    position:fixed; top:16px; left:16px; z-index:1200;
+    display:flex; align-items:center; gap:8px;
+    background:rgba(0,0,0,0.6); color:#fff;
+    padding:6px 10px; border-radius:8px;
+    font:14px system-ui,sans-serif;
+    user-select:none;
+  `;
 
-export function createTimeOverlay(map, { position = 'topright', intervalMs = 1000 } = {}) {
-  let container = null;
-  let timeLabel = null;
-  let timerLabel = null;
-  let notifsButton = null;
-  let intervalId = null;
+  const timeLabel = document.createElement('span');
+  timeLabel.textContent = formatTime(new Date());
+  root.appendChild(timeLabel);
+
+  const timerLabel = document.createElement('span');
+  timerLabel.style.cssText = `
+    display:none; font-size:18px; font-weight:bold;
+    color:#fbbf24; letter-spacing:2px;
+  `;
+  root.appendChild(timerLabel);
+
+  const settingsBtn = document.createElement('button');
+  settingsBtn.type = 'button';
+  settingsBtn.textContent = '⚙️';
+  settingsBtn.title = 'Paramètres';
+  settingsBtn.style.cssText = `
+    background:transparent; border:none; color:#fff; cursor:pointer;
+    font-size:16px; padding:0 2px; line-height:1; display:flex;
+    align-items:center;
+  `;
+  root.appendChild(settingsBtn);
+
+  container.appendChild(root);
+
   let timerRemaining = 0;
-  let notifsEnabled = false;
-  let onEnableNotifs = null;
-  let onDisableNotifs = null;
-  let onTestNotif = null;
+  let onSettingsClickHandler = null;
 
-  const control = L.control({ position });
-  control.onAdd = () => {
-    container = L.DomUtil.create('div');
-    container.style.display = 'flex';
-    container.style.flexDirection = 'column';
-    container.style.gap = '6px';
-    container.style.background = 'rgba(0, 0, 0, 0.6)';
-    container.style.color = '#ffffff';
-    container.style.padding = '8px 10px';
-    container.style.borderRadius = '8px';
-    container.style.font = '14px system-ui, sans-serif';
-
-    timeLabel = L.DomUtil.create('div', '', container);
+  const intervalId = setInterval(() => {
     timeLabel.textContent = formatTime(new Date());
-
-    // Timer caché par défaut — apparaît uniquement lors de l'événement
-    timerLabel = L.DomUtil.create('div', '', container);
-    timerLabel.style.display = 'none';
-    timerLabel.style.fontSize = '22px';
-    timerLabel.style.fontWeight = 'bold';
-    timerLabel.style.color = '#fbbf24';
-    timerLabel.style.letterSpacing = '2px';
-
-    notifsButton = makeButton('Activer notifs', '#60a5fa');
-    container.appendChild(notifsButton);
-    notifsButton.addEventListener('click', (e) => {
-      e.preventDefault();
-      if (notifsEnabled) {
-        notifsEnabled = false;
-        localStorage.setItem(NOTIFS_KEY, 'false');
-        notifsButton.textContent = 'Activer notifs';
-        notifsButton.style.background = '#60a5fa';
-        notifsButton.disabled = false;
-        onDisableNotifs?.();
-      } else {
-        notifsButton.disabled = true;
-        notifsButton.textContent = '...';
-        onEnableNotifs?.((result) => {
-          if (result?.granted) {
-            notifsEnabled = true;
-            localStorage.setItem(NOTIFS_KEY, 'true');
-            notifsButton.textContent = 'Désactiver notifs';
-            notifsButton.style.background = '#4ade80';
-            notifsButton.disabled = false;
-          } else {
-            notifsButton.textContent = 'Permission refusée';
-            notifsButton.style.background = '#f87171';
-            notifsButton.disabled = false;
-          }
-        });
-      }
-    });
-
-    const testButton = makeButton('Test notif', '#fbbf24');
-    container.appendChild(testButton);
-    testButton.addEventListener('click', (e) => {
-      e.preventDefault();
-      onTestNotif?.();
-    });
-
-    L.DomEvent.disableClickPropagation(container);
-    L.DomEvent.disableScrollPropagation(container);
-
-    // Restaure l'état sauvegardé si la permission est déjà accordée
-    if (localStorage.getItem(NOTIFS_KEY) === 'true' && Notification.permission === 'granted') {
-      notifsEnabled = true;
-      notifsButton.textContent = 'Désactiver notifs';
-      notifsButton.style.background = '#4ade80';
-    }
-
-    return container;
-  };
-
-  control.addTo(map);
-
-  intervalId = setInterval(() => {
-    if (!timeLabel) return;
-    timeLabel.textContent = formatTime(new Date());
-
     if (timerRemaining > 0) {
-      timerRemaining -= 1;
-      if (timerLabel) timerLabel.textContent = formatCountdown(timerRemaining);
-      if (timerRemaining === 0 && timerLabel) timerLabel.style.display = 'none';
+      timerRemaining--;
+      timerLabel.textContent = formatCountdown(timerRemaining);
+      if (timerRemaining === 0) timerLabel.style.display = 'none';
     }
-  }, intervalMs);
+  }, 1000);
+
+  settingsBtn.addEventListener('click', () => onSettingsClickHandler?.());
 
   function startTimer(seconds = 60) {
     timerRemaining = seconds;
-    if (timerLabel) {
-      timerLabel.textContent = formatCountdown(timerRemaining);
-      timerLabel.style.display = 'block';
-    }
+    timerLabel.textContent = formatCountdown(seconds);
+    timerLabel.style.display = 'inline';
   }
 
   function remove() {
-    if (intervalId) clearInterval(intervalId);
-    control.remove();
-    intervalId = null;
-    container = null;
-    timeLabel = null;
-    timerLabel = null;
-    notifsButton = null;
+    clearInterval(intervalId);
+    root.remove();
   }
 
   return {
     remove,
     startTimer,
-    onEnableNotifs: (handler) => { onEnableNotifs = handler; },
-    onDisableNotifs: (handler) => { onDisableNotifs = handler; },
-    onTestNotif: (handler) => { onTestNotif = handler; }
+    onSettingsClick: (handler) => { onSettingsClickHandler = handler; },
   };
 }

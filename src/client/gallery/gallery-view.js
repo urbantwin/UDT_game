@@ -4,6 +4,7 @@
 // - Add filters for user/team and handle live insertions/removals.
 
 import { SUBMISSION_WINDOW } from '../../../game/game-config.js';
+import { updatePhotoRecord } from '../services/photo-store.js';
 
 export function createGalleryView({ container = document.body, onSubmit } = {}) {
   const root = document.createElement('div');
@@ -137,51 +138,72 @@ export function createGalleryView({ container = document.body, onSubmit } = {}) 
       right.style.alignItems = 'flex-end';
       right.style.gap = '4px';
 
-      const submitButton = document.createElement('button');
-      submitButton.type = 'button';
-      submitButton.textContent = 'Submit';
-      submitButton.style.background = '#60a5fa';
-      submitButton.style.color = '#111827';
-      submitButton.style.border = 'none';
-      submitButton.style.borderRadius = '6px';
-      submitButton.style.padding = '4px 6px';
-      submitButton.style.cursor = 'pointer';
-      submitButton.style.font = '11px system-ui, sans-serif';
-
       const status = document.createElement('div');
       status.style.font = '10px system-ui, sans-serif';
       status.style.opacity = '0.8';
 
-      const hasLocation = Boolean(photo.location);
-      const withinWindow = isSubmissionWindowOpen();
-      const canSubmit = hasLocation && withinWindow;
-      if (!canSubmit) {
-        submitButton.disabled = true;
-        submitButton.style.opacity = '0.5';
-        if (!withinWindow) {
-          status.textContent = 'Window closed';
-        } else {
-          status.textContent = 'No GPS';
+      if (photo.submitted) {
+        // Photo déjà soumise → souvenir, pas de re-submit possible
+        const souvenir = document.createElement('div');
+        souvenir.textContent = '📌 Souvenir';
+        souvenir.style.cssText = `
+          font:11px system-ui,sans-serif; color:#86efac;
+          padding:4px 6px; border-radius:6px;
+          background:rgba(134,239,172,0.12);
+        `;
+        right.appendChild(souvenir);
+      } else {
+        const submitButton = document.createElement('button');
+        submitButton.type = 'button';
+        submitButton.textContent = 'Submit';
+        submitButton.style.background = '#60a5fa';
+        submitButton.style.color = '#111827';
+        submitButton.style.border = 'none';
+        submitButton.style.borderRadius = '6px';
+        submitButton.style.padding = '4px 6px';
+        submitButton.style.cursor = 'pointer';
+        submitButton.style.font = '11px system-ui, sans-serif';
+
+        const hasLocation = Boolean(photo.location);
+        const withinWindow = isSubmissionWindowOpen();
+        const canSubmit = hasLocation && withinWindow;
+        if (!canSubmit) {
+          submitButton.disabled = true;
+          submitButton.style.opacity = '0.5';
+          status.textContent = !withinWindow ? 'Window closed' : 'No GPS';
         }
+
+        submitButton.addEventListener('click', async (event) => {
+          event.preventDefault();
+          if (!onSubmit) return;
+          submitButton.disabled = true;
+          status.textContent = 'Envoi…';
+          try {
+            await onSubmit({ photo });
+            // Persister "submitted" en IndexedDB pour survivre aux rechargements
+            if (photo.id) {
+              await updatePhotoRecord(photo.id, { submitted: true });
+            }
+            // Remplacer le bouton par l'étiquette Souvenir
+            submitButton.remove();
+            status.remove();
+            const souvenir = document.createElement('div');
+            souvenir.textContent = '📌 Souvenir';
+            souvenir.style.cssText = `
+              font:11px system-ui,sans-serif; color:#86efac;
+              padding:4px 6px; border-radius:6px;
+              background:rgba(134,239,172,0.12);
+            `;
+            right.appendChild(souvenir);
+          } catch (error) {
+            status.textContent = error?.message ?? 'Échec';
+            submitButton.disabled = false;
+          }
+        });
+
+        right.appendChild(submitButton);
+        right.appendChild(status);
       }
-
-      submitButton.addEventListener('click', async (event) => {
-        event.preventDefault();
-        if (!onSubmit) return;
-        submitButton.disabled = true;
-        status.textContent = 'Submitting...';
-        try {
-          await onSubmit({ photo });
-          status.textContent = 'Submitted';
-          submitButton.style.opacity = '0.6';
-        } catch (error) {
-          status.textContent = error?.message ?? 'Failed';
-          submitButton.disabled = false;
-        }
-      });
-
-      right.appendChild(submitButton);
-      right.appendChild(status);
       item.appendChild(right);
       list.appendChild(item);
     }
@@ -196,10 +218,14 @@ export function createGalleryView({ container = document.body, onSubmit } = {}) 
     panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
   });
 
+  function open() {
+    panel.style.display = 'block';
+  }
+
   function remove() {
     clearObjectUrls();
     root.remove();
   }
 
-  return { setPhotos, addPhoto, remove };
+  return { setPhotos, addPhoto, open, remove };
 }

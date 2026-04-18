@@ -30,15 +30,21 @@ export async function getDb() {
   )`);
 
   await run(_db, `CREATE TABLE IF NOT EXISTS photos (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    userId    INTEGER REFERENCES users(id),
-    clientId  TEXT,
-    createdAt INTEGER NOT NULL,
-    width     INTEGER,
-    height    INTEGER,
-    type      TEXT    DEFAULT 'image/png',
-    location  TEXT,
-    dataUrl   TEXT    NOT NULL
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId           INTEGER REFERENCES users(id),
+    clientId         TEXT,
+    createdAt        INTEGER NOT NULL,
+    width            INTEGER,
+    height           INTEGER,
+    type             TEXT    DEFAULT 'image/png',
+    location         TEXT,
+    dataUrl          TEXT    NOT NULL,
+    category         TEXT    NOT NULL DEFAULT 'contribution',
+    status           TEXT    NOT NULL DEFAULT 'pending',
+    challengePhotoId INTEGER REFERENCES photos(id),
+    photoReviewedBy  INTEGER REFERENCES users(id),
+    photoReviewedAt  INTEGER,
+    photoReviewNote  TEXT
   )`);
 
   // Defis journaliers : un lieu cible par jour
@@ -74,6 +80,26 @@ export async function getDb() {
     reviewNote   TEXT,
     createdAt    INTEGER NOT NULL
   )`);
+
+  // Migrations souples — nouvelles colonnes photos (4-bucket system)
+  try {
+    await run(_db, "ALTER TABLE photos ADD COLUMN category TEXT NOT NULL DEFAULT 'contribution'");
+  } catch {}
+  try {
+    await run(_db, "ALTER TABLE photos ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'");
+  } catch {}
+  try {
+    await run(_db, 'ALTER TABLE photos ADD COLUMN challengePhotoId INTEGER REFERENCES photos(id)');
+  } catch {}
+  try {
+    await run(_db, 'ALTER TABLE photos ADD COLUMN photoReviewedBy INTEGER REFERENCES users(id)');
+  } catch {}
+  try {
+    await run(_db, 'ALTER TABLE photos ADD COLUMN photoReviewedAt INTEGER');
+  } catch {}
+  try {
+    await run(_db, 'ALTER TABLE photos ADD COLUMN photoReviewNote TEXT');
+  } catch {}
 
   // Migrations souples pour les anciennes bases
   try {
@@ -111,6 +137,20 @@ export async function getDb() {
   )`);
   try {
     await run(_db, 'ALTER TABLE guesses ADD COLUMN userId INTEGER REFERENCES users(id)');
+  } catch {}
+
+  await run(_db, `CREATE TABLE IF NOT EXISTS notifications (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId    INTEGER NOT NULL REFERENCES users(id),
+    type      TEXT    NOT NULL,
+    message   TEXT    NOT NULL,
+    photoId   INTEGER REFERENCES photos(id),
+    read      INTEGER NOT NULL DEFAULT 0,
+    createdAt INTEGER NOT NULL
+  )`);
+
+  try {
+    await run(_db, 'ALTER TABLE notifications ADD COLUMN photoId INTEGER REFERENCES photos(id)');
   } catch {}
 
   await ensureDevAccount(_db);

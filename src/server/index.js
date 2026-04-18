@@ -224,8 +224,8 @@ app.post('/api/photos', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
     const result = await run(db,
-      `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, category, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'contribution', 'pending')`,
       [
         req.user.id,
         clientId ?? null,
@@ -255,6 +255,179 @@ app.post('/api/photos', requireAuth, async (req, res) => {
   }
 });
 
+// ── BUCKET ROUTES ──────────────────────────────────────────────────────────
+
+// POST /api/photos/contribute  → Bucket 1 (contribution en attente validation)
+app.post('/api/photos/contribute', requireAuth, async (req, res) => {
+  const { clientId, createdAt, width, height, type, location, dataUrl } = req.body || {};
+  if (!dataUrl || !createdAt) {
+    res.status(400).json({ error: 'Missing photo payload.' });
+    return;
+  }
+  if (!location) {
+    res.status(400).json({ error: 'Location required to contribute a photo.' });
+    return;
+  }
+  try {
+    const db = await getDb();
+    const result = await run(db,
+      `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, category, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'contribution', 'pending')`,
+      [req.user.id, clientId ?? null, createdAt, width ?? null, height ?? null,
+       type ?? 'image/png', JSON.stringify(location), dataUrl]
+    );
+    res.json({ id: result.lastID });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/photos/respond  → Bucket 3 (réponse à un challenge, en attente validation)
+app.post('/api/photos/respond', requireAuth, async (req, res) => {
+  const { clientId, createdAt, width, height, type, location, dataUrl, challengePhotoId } = req.body || {};
+  if (!dataUrl || !createdAt) {
+    res.status(400).json({ error: 'Missing photo payload.' });
+    return;
+  }
+  if (!location) {
+    res.status(400).json({ error: 'Location required to respond to a challenge.' });
+    return;
+  }
+  if (!challengePhotoId) {
+    res.status(400).json({ error: 'Missing challengePhotoId.' });
+    return;
+  }
+  try {
+    const db = await getDb();
+    const challengePhoto = await getPhotoById(db, Number(challengePhotoId));
+    // Accepter 'validated' (pool) et 'served' (envoyée en challenge mais pas encore répondue)
+    if (!challengePhoto || challengePhoto.category !== 'contribution'
+        || !['validated', 'served'].includes(challengePhoto.status)) {
+      res.status(400).json({ error: 'Invalid or unavailable challenge photo.' });
+      return;
+    }
+    const result = await run(db,
+      `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, category, status, challengePhotoId)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'response', 'pending', ?)`,
+      [req.user.id, clientId ?? null, createdAt, width ?? null, height ?? null,
+       type ?? 'image/png', JSON.stringify(location), dataUrl, Number(challengePhotoId)]
+    );
+    res.json({ id: result.lastID });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/admin/photos?bucket=1|2|3|4  → liste par bucket (admin only)
+app.get('/api/admin/photos', requireAuth, requireDevAccess, async (req, res) => {
+  const bucket = Number(req.query.bucket);
+  const bucketMap = {
+    1: { category: 'contribution', status: 'pending' },
+    2: { category: 'contribution', status: 'validated' },
+    3: { category: 'response',     status: 'pending' },
+    4: { category: 'response',     status: 'validated' },
+  };
+  if (!bucketMap[bucket]) {
+    res.status(400).json({ error: 'Bucket must be 1, 2, 3 or 4.' });
+    return;
+  }
+  const { category, status } = bucketMap[bucket];
+  try {
+    const db = await getDb();
+    const rows = await all(db,
+      `SELECT p.id, p.userId, p.clientId, p.createdAt, p.width, p.height, p.type,
+              p.location, p.dataUrl, p.category, p.status, p.challengePhotoId,
+              p.photoReviewedBy, p.photoReviewedAt, p.photoReviewNote,
+              u.username  AS submitterUsername,
+              cp.dataUrl  AS challengeDataUrl,
+              cp.location AS challengeLocation,
+              cpu.username AS challengeSubmitterUsername
+       FROM photos p
+       LEFT JOIN users u   ON u.id   = p.userId
+       LEFT JOIN photos cp ON cp.id  = p.challengePhotoId
+       LEFT JOIN users cpu ON cpu.id = cp.userId
+       WHERE p.category = ? AND p.status = ?
+       ORDER BY p.createdAt DESC`,
+      [category, status]
+    );
+    res.json(rows.map(r => ({
+      ...r,
+      location:          safeJsonParse(r.location),
+      challengeLocation: safeJsonParse(r.challengeLocation),
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/admin/photos/:id/review  → valider ou rejeter une photo (admin only)
+app.post('/api/admin/photos/:id/review', requireAuth, requireDevAccess, async (req, res) => {
+  const photoId = Number(req.params.id);
+  const { action, note } = req.body || {};
+  const normalizedAction = String(action || '').toLowerCase();
+  if (!Number.isInteger(photoId) || photoId <= 0) {
+    res.status(400).json({ error: 'Invalid photo id.' });
+    return;
+  }
+  if (!['validate', 'discard'].includes(normalizedAction)) {
+    res.status(400).json({ error: 'Action must be validate or discard.' });
+    return;
+  }
+  const newStatus = normalizedAction === 'validate' ? 'validated' : 'discarded';
+  const reviewNote = typeof note === 'string' && note.trim() ? note.trim().slice(0, 500) : null;
+  try {
+    const db = await getDb();
+    const existing = await getPhotoById(db, photoId);
+    if (!existing) {
+      res.status(404).json({ error: 'Photo not found.' });
+      return;
+    }
+    await run(db,
+      `UPDATE photos SET status = ?, photoReviewedBy = ?, photoReviewedAt = ?, photoReviewNote = ? WHERE id = ?`,
+      [newStatus, req.user.id, Date.now(), reviewNote, photoId]
+    );
+
+    // Si une RÉPONSE est refusée → remettre la photo originale en 'validated' (bucket 2)
+    if (existing.category === 'response' && normalizedAction === 'discard' && existing.challengePhotoId) {
+      await run(db,
+        "UPDATE photos SET status = 'validated' WHERE id = ? AND category = 'contribution'",
+        [existing.challengePhotoId]
+      );
+    }
+
+    // Envoyer une notification au joueur propriétaire de la photo
+    if (existing.userId) {
+      const notifMessage = buildReviewNotification(existing.category, normalizedAction, reviewNote);
+      if (notifMessage) {
+        const notifType = `${existing.category}_${normalizedAction === 'validate' ? 'validated' : 'discarded'}`;
+      await run(db,
+          'INSERT INTO notifications (userId, type, message, photoId, createdAt) VALUES (?, ?, ?, ?, ?)',
+          [existing.userId, notifType, notifMessage, photoId, Date.now()]
+        );
+      }
+    }
+
+    res.json({ id: photoId, status: newStatus });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function buildReviewNotification(category, action, note) {
+  const noteStr = note ? ` (${note})` : '';
+  if (category === 'contribution') {
+    return action === 'validate'
+      ? `✅ Ta photo a été approuvée et ajoutée au pool de challenges !`
+      : `❌ Ta photo a été refusée.${noteStr}`;
+  }
+  if (category === 'response') {
+    return action === 'validate'
+      ? `🏆 Félicitations ! Tu as réussi le challenge. Ta photo a été validée !`
+      : `💔 Challenge échoué. Ta photo n'a pas été retenue.${noteStr}`;
+  }
+  return null;
+}
+
 // â”€â”€ CHALLENGES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // GET /api/challenge/today  â†’ dÃ©fi du jour (crÃ©Ã© si inexistant)
@@ -274,13 +447,16 @@ app.post('/api/challenge/request', requireAuth, async (req, res) => {
 
   try {
     const db = await getDb();
-    const candidate = await pickChallengePhotoForUser(db, req.user.id, now);
+    const candidate = await pickChallengePhotoForUser(db, req.user.id);
     if (!candidate) {
       res.status(404).json({ error: 'No eligible challenge photo found.' });
       return;
     }
 
-    // Record as seen for this player before returning it.
+    // Marquer la photo comme "en cours de challenge" → sort du bucket 2
+    await run(db, "UPDATE photos SET status = 'served' WHERE id = ?", [candidate.id]);
+
+    // Record as seen for this player
     await run(
       db,
       'INSERT INTO challenge_views (userId, photoId, servedDate, createdAt) VALUES (?, ?, ?, ?)',
@@ -440,52 +616,24 @@ async function getChallengeById(db, challengeId) {
   return (await all(db, 'SELECT * FROM challenges WHERE id = ?', [challengeId]))[0] ?? null;
 }
 
-async function pickChallengePhotoForUser(db, userId, now = new Date()) {
-  const servedToday = await all(
+async function pickChallengePhotoForUser(db, userId) {
+  // Bucket 2: contributions validées, pas prises par ce joueur, pas déjà vues
+  const rows = await all(
     db,
-    'SELECT photoId, COUNT(*) as count FROM challenge_views WHERE servedDate = ? GROUP BY photoId',
-    [formatLocalDate(now)]
+    `SELECT p.id, p.dataUrl
+     FROM photos p
+     WHERE p.category = 'contribution'
+       AND p.status   = 'validated'
+       AND (p.userId IS NULL OR p.userId != ?)
+       AND NOT EXISTS (
+         SELECT 1 FROM challenge_views v WHERE v.userId = ? AND v.photoId = p.id
+       )`,
+    [userId, userId]
   );
-  const servedTodayCount = new Map(servedToday.map((row) => [row.photoId, Number(row.count) || 0]));
-
-  for (let dayOffset = 0; dayOffset <= 4; dayOffset += 1) {
-    const { startMs, endMs } = getLocalDayRange(now, dayOffset);
-    const rows = await all(
-      db,
-      `SELECT DISTINCT p.id, p.dataUrl, p.createdAt
-       FROM photos p
-       JOIN submissions s ON s.photoId = p.id AND s.reviewStatus = 'validated'
-       WHERE p.createdAt BETWEEN ? AND ?
-         AND (p.userId IS NULL OR p.userId != ?)
-         AND NOT EXISTS (
-           SELECT 1 FROM challenge_views v WHERE v.userId = ? AND v.photoId = p.id
-         )
-         AND NOT EXISTS (
-           SELECT 1 FROM submissions own WHERE own.userId = ? AND own.photoId = p.id
-         )`,
-      [startMs, endMs, userId, userId, userId]
-    );
-
-    if (!rows.length) continue;
-
-    const minAssignments = Math.min(
-      ...rows.map((row) => servedTodayCount.get(row.id) ?? 0)
-    );
-    const pool = rows.filter((row) => (servedTodayCount.get(row.id) ?? 0) === minAssignments);
-    return pool[Math.floor(Math.random() * pool.length)];
-  }
-
-  return null;
+  if (!rows.length) return null;
+  return rows[Math.floor(Math.random() * rows.length)];
 }
 
-function getLocalDayRange(now, dayOffset) {
-  const day = new Date(now);
-  day.setHours(0, 0, 0, 0);
-  day.setDate(day.getDate() - dayOffset);
-  const startMs = day.getTime();
-  const endMs = startMs + (24 * 60 * 60 * 1000) - 1;
-  return { startMs, endMs };
-}
 
 function isChallengeRequestWindow(now = new Date()) {
   return isWithinWindow(CHALLENGE_WINDOW, now);
@@ -573,6 +721,49 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
 }
 
 // â”€â”€ WEBSOCKET & SERVER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// ── NOTIFICATIONS ─────────────────────────────────────────────────────────
+
+// GET /api/notifications  → notifs du joueur connecté
+app.get('/api/notifications', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const rows = await all(db,
+      `SELECT id, type, message, photoId, read, createdAt
+       FROM notifications WHERE userId = ? ORDER BY createdAt DESC LIMIT 50`,
+      [req.user.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/notifications/read-all  → marquer tout comme lu
+app.post('/api/notifications/read-all', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb();
+    await run(db, 'UPDATE notifications SET read = 1 WHERE userId = ?', [req.user.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/notifications/:id/read  → marquer une notif comme lue
+app.post('/api/notifications/:id/read', requireAuth, async (req, res) => {
+  const notifId = Number(req.params.id);
+  try {
+    const db = await getDb();
+    await run(db,
+      'UPDATE notifications SET read = 1 WHERE id = ? AND userId = ?',
+      [notifId, req.user.id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });

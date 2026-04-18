@@ -1,268 +1,300 @@
-import { getAdminSubmissions, reviewSubmission } from '../services/admin-api.js';
+import { getAdminPhotosByBucket, reviewPhoto } from '../services/admin-api.js';
 
-// Dev admin gallery.
-// This UI is intentionally simple and read-only for now.
-// Next step: add validate/discard actions per submission item.
+const BUCKETS = [
+  { id: 1, label: '① Contributions en attente',  color: '#fbbf24' },
+  { id: 2, label: '② Pool validé',                color: '#34d399' },
+  { id: 3, label: '③ Réponses en attente',        color: '#60a5fa' },
+  { id: 4, label: '④ Base finale (validé)',        color: '#a78bfa' },
+];
+
 export function createAdminGalleryView({ container = document.body } = {}) {
   const root = document.createElement('div');
-  root.style.position = 'fixed';
-  root.style.right = '16px';
-  root.style.bottom = '380px';
-  root.style.zIndex = '1300';
-  root.style.display = 'none';
-  root.style.flexDirection = 'column';
-  root.style.alignItems = 'flex-end';
-  root.style.gap = '8px';
+  root.style.cssText = `
+    position:fixed; right:16px; top:130px; z-index:1300;
+    display:none; flex-direction:column; align-items:flex-end; gap:8px;
+  `;
 
+  // ── Toggle button ────────────────────────────────────────────────────────
   const openButton = document.createElement('button');
   openButton.type = 'button';
-  openButton.textContent = 'Admin Gallery';
-  openButton.style.background = '#f59e0b';
-  openButton.style.color = '#111827';
-  openButton.style.border = 'none';
-  openButton.style.borderRadius = '6px';
-  openButton.style.padding = '6px 10px';
-  openButton.style.cursor = 'pointer';
-  openButton.style.font = '12px system-ui, sans-serif';
+  openButton.textContent = 'Admin';
+  openButton.style.cssText = `
+    background:#f59e0b; color:#111827; border:none; border-radius:6px;
+    padding:6px 10px; cursor:pointer; font:12px system-ui,sans-serif;
+  `;
   root.appendChild(openButton);
 
+  // ── Panel ────────────────────────────────────────────────────────────────
   const panel = document.createElement('div');
-  panel.style.display = 'none';
-  panel.style.background = 'rgba(0, 0, 0, 0.82)';
-  panel.style.color = '#ffffff';
-  panel.style.padding = '10px';
-  panel.style.borderRadius = '10px';
-  panel.style.width = '340px';
-  panel.style.maxHeight = '380px';
-  panel.style.overflowY = 'auto';
-  panel.style.boxShadow = '0 6px 16px rgba(0, 0, 0, 0.35)';
+  panel.style.cssText = `
+    display:none; background:rgba(0,0,0,0.88); color:#fff;
+    border-radius:10px; width:420px;
+    box-shadow:0 6px 16px rgba(0,0,0,0.4); flex-direction:column;
+    max-height:calc(100vh - 120px);
+  `;
+
+  // ── Zone fixe : header + tabs (ne scroll pas) ───────────────────────────
+  const fixedTop = document.createElement('div');
+  fixedTop.style.cssText = `
+    padding:10px 10px 6px; background:rgba(0,0,0,0.88);
+    border-bottom:1px solid rgba(255,255,255,0.08);
+    display:flex; flex-direction:column; gap:6px;
+  `;
 
   const header = document.createElement('div');
-  header.style.display = 'flex';
-  header.style.justifyContent = 'space-between';
-  header.style.alignItems = 'center';
-  header.style.marginBottom = '8px';
-
-  const title = document.createElement('div');
-  title.textContent = 'All Player Submissions';
-  title.style.fontWeight = '600';
+  header.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+  const title = document.createElement('span');
+  title.textContent = 'Admin — 4 Buckets';
+  title.style.cssText = 'font-weight:600; font-size:13px;';
+  const refreshBtn = makeBtn('↻ Refresh', '#60a5fa');
   header.appendChild(title);
+  header.appendChild(refreshBtn);
+  fixedTop.appendChild(header);
 
-  const refreshButton = document.createElement('button');
-  refreshButton.type = 'button';
-  refreshButton.textContent = 'Refresh';
-  refreshButton.style.background = '#60a5fa';
-  refreshButton.style.color = '#111827';
-  refreshButton.style.border = 'none';
-  refreshButton.style.borderRadius = '6px';
-  refreshButton.style.padding = '4px 8px';
-  refreshButton.style.cursor = 'pointer';
-  refreshButton.style.font = '11px system-ui, sans-serif';
-  header.appendChild(refreshButton);
+  // Tabs
+  const tabBar = document.createElement('div');
+  tabBar.style.cssText = 'display:flex; gap:4px; flex-wrap:wrap;';
+  fixedTop.appendChild(tabBar);
+  panel.appendChild(fixedTop);
 
-  panel.appendChild(header);
+  // ── Zone scrollable : liste des photos ───────────────────────────────────
+  // ~3 photos simples (~80px) ou ~3 tandems (~180px) visibles avant scroll
+  const scrollArea = document.createElement('div');
+  scrollArea.style.cssText = `
+    overflow-y: scroll;
+    flex: 1;
+    min-height: 0;
+    padding: 8px;
+    scroll-behavior: smooth;
+  `;
 
-  const info = document.createElement('div');
-  info.textContent = 'Pending items can be validated or discarded.';
-  info.style.opacity = '0.8';
-  info.style.fontSize = '11px';
-  info.style.marginBottom = '8px';
-  panel.appendChild(info);
+  const content = document.createElement('div');
+  content.style.cssText = 'display:flex; flex-direction:column; gap:10px;';
+  scrollArea.appendChild(content);
+  panel.appendChild(scrollArea);
 
-  const list = document.createElement('div');
-  list.style.display = 'flex';
-  list.style.flexDirection = 'column';
-  list.style.gap = '8px';
-  panel.appendChild(list);
+  let activeBucket = 1;
+
+  BUCKETS.forEach(b => {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.textContent = b.label;
+    tab.dataset.bucket = String(b.id);
+    tab.style.cssText = `
+      background:rgba(255,255,255,0.08); color:#fff; border:1px solid rgba(255,255,255,0.15);
+      border-radius:5px; padding:3px 7px; cursor:pointer; font:10px system-ui,sans-serif;
+    `;
+    tab.addEventListener('click', () => {
+      activeBucket = b.id;
+      updateTabStyles();
+      scrollArea.scrollTop = 0;
+      loadBucket(b.id);
+    });
+    tabBar.appendChild(tab);
+  });
 
   root.appendChild(panel);
   container.appendChild(root);
 
-  openButton.addEventListener('click', () => {
-    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-    if (panel.style.display === 'block') {
-      refresh();
+  function updateTabStyles() {
+    for (const tab of tabBar.querySelectorAll('button')) {
+      const bid = Number(tab.dataset.bucket);
+      const bucket = BUCKETS.find(b => b.id === bid);
+      tab.style.background = bid === activeBucket ? bucket.color : 'rgba(255,255,255,0.08)';
+      tab.style.color       = bid === activeBucket ? '#111827'  : '#fff';
     }
-  });
+  }
 
-  refreshButton.addEventListener('click', () => {
-    refresh();
-  });
-
-  async function refresh() {
-    list.innerHTML = '';
+  // ── Load bucket ──────────────────────────────────────────────────────────
+  async function loadBucket(bucketId) {
+    scrollArea.scrollTop = 0;
+    content.innerHTML = '';
     const loading = document.createElement('div');
-    loading.textContent = 'Loading submissions...';
-    loading.style.opacity = '0.8';
-    list.appendChild(loading);
+    loading.textContent = 'Chargement…';
+    loading.style.cssText = 'opacity:0.7; font:12px system-ui,sans-serif;';
+    content.appendChild(loading);
 
     try {
-      const items = await getAdminSubmissions();
-      list.innerHTML = '';
+      const items = await getAdminPhotosByBucket(bucketId);
+      content.innerHTML = '';
+
       if (!items.length) {
         const empty = document.createElement('div');
-        empty.textContent = 'No submissions found.';
-        empty.style.opacity = '0.8';
-        list.appendChild(empty);
+        empty.textContent = 'Aucune photo dans ce bucket.';
+        empty.style.cssText = 'opacity:0.7; font:12px system-ui,sans-serif;';
+        content.appendChild(empty);
         return;
       }
 
       for (const item of items) {
-        const row = document.createElement('div');
-        row.style.display = 'grid';
-        row.style.gridTemplateColumns = '56px 1fr auto';
-        row.style.gap = '8px';
-        row.style.alignItems = 'center';
-        row.style.background = 'rgba(255, 255, 255, 0.06)';
-        row.style.padding = '6px';
-        row.style.borderRadius = '8px';
-
-        const img = document.createElement('img');
-        img.src = item.dataUrl;
-        img.alt = 'Submitted photo';
-        img.style.width = '56px';
-        img.style.height = '56px';
-        img.style.objectFit = 'cover';
-        img.style.borderRadius = '6px';
-        row.appendChild(img);
-
-        const meta = document.createElement('div');
-        meta.style.display = 'flex';
-        meta.style.flexDirection = 'column';
-        meta.style.gap = '2px';
-        meta.style.fontSize = '11px';
-
-        const author = document.createElement('div');
-        author.textContent = `Player: ${item.submitterUsername ?? 'unknown'}`;
-        const challenge = document.createElement('div');
-        challenge.textContent = `Challenge: ${item.challengeDate ?? '-'} (${item.challengeLocationId ?? '-'})`;
-        const status = document.createElement('div');
-        status.textContent = `Review: ${item.reviewStatus ?? 'pending'}`;
-        status.style.opacity = '0.85';
-        status.style.textTransform = 'capitalize';
-        const date = document.createElement('div');
-        date.textContent = `Submitted: ${new Date(item.submittedAt).toLocaleString('en-GB', { hour12: false })}`;
-        date.style.opacity = '0.75';
-
-        const reviewedMeta = document.createElement('div');
-        if (item.reviewedAt) {
-          const reviewer = item.reviewedByUsername ?? `id ${item.reviewedBy ?? '-'}`;
-          reviewedMeta.textContent = `Reviewed by ${reviewer} at ${new Date(item.reviewedAt).toLocaleString('en-GB', { hour12: false })}`;
-          reviewedMeta.style.opacity = '0.7';
-        } else {
-          reviewedMeta.textContent = 'Not reviewed yet';
-          reviewedMeta.style.opacity = '0.7';
-        }
-
-        meta.appendChild(author);
-        meta.appendChild(challenge);
-        meta.appendChild(status);
-        meta.appendChild(date);
-        meta.appendChild(reviewedMeta);
-        row.appendChild(meta);
-
-        const actions = document.createElement('div');
-        actions.style.display = 'flex';
-        actions.style.flexDirection = 'column';
-        actions.style.gap = '4px';
-        actions.style.alignItems = 'stretch';
-
-        const pending = (item.reviewStatus ?? 'pending') === 'pending';
-        if (pending) {
-          const validateButton = makeActionButton('Validate', '#86efac');
-          const discardButton = makeActionButton('Discard', '#fca5a5');
-          const actionStatus = document.createElement('div');
-          actionStatus.style.fontSize = '10px';
-          actionStatus.style.opacity = '0.8';
-
-          validateButton.addEventListener('click', async () => {
-            await onReviewAction({
-              submissionId: item.submissionId,
-              action: 'validate',
-              actionStatus,
-              validateButton,
-              discardButton
-            });
-          });
-
-          discardButton.addEventListener('click', async () => {
-            await onReviewAction({
-              submissionId: item.submissionId,
-              action: 'discard',
-              actionStatus,
-              validateButton,
-              discardButton
-            });
-          });
-
-          actions.appendChild(validateButton);
-          actions.appendChild(discardButton);
-          actions.appendChild(actionStatus);
-        } else {
-          const locked = document.createElement('div');
-          locked.textContent = 'Reviewed';
-          locked.style.fontSize = '11px';
-          locked.style.opacity = '0.7';
-          actions.appendChild(locked);
-        }
-
-        row.appendChild(actions);
-        list.appendChild(row);
+        content.appendChild(buildRow(item, bucketId));
       }
-    } catch (error) {
-      list.innerHTML = '';
-      const failed = document.createElement('div');
-      failed.textContent = error.message || 'Failed to load.';
-      failed.style.color = '#fca5a5';
-      list.appendChild(failed);
+    } catch (err) {
+      content.innerHTML = '';
+      const errEl = document.createElement('div');
+      errEl.textContent = err.message || 'Erreur de chargement.';
+      errEl.style.color = '#fca5a5';
+      content.appendChild(errEl);
     }
   }
 
-  async function onReviewAction({
-    submissionId,
-    action,
-    actionStatus,
-    validateButton,
-    discardButton
-  }) {
-    validateButton.disabled = true;
-    discardButton.disabled = true;
-    actionStatus.textContent = 'Saving...';
+  // ── Build row ────────────────────────────────────────────────────────────
+  function buildRow(item, bucketId) {
+    const isTandem = (bucketId === 3 || bucketId === 4) && item.challengeDataUrl;
+
+    const row = document.createElement('div');
+    row.style.cssText = `
+      display:flex; flex-direction:column; gap:6px;
+      background:rgba(255,255,255,0.06); padding:8px; border-radius:8px;
+    `;
+
+    if (isTandem) {
+      // ── Tandem : photo challenge + photo réponse côte à côte ────────────
+      const tandem = document.createElement('div');
+      tandem.style.cssText = 'display:grid; grid-template-columns:1fr auto 1fr; gap:6px; align-items:start;';
+
+      // Colonne gauche : photo originale du challenge
+      const leftCol = document.createElement('div');
+      leftCol.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
+      leftCol.appendChild(makeThumb(item.challengeDataUrl, 'Photo challenge', '100%'));
+      leftCol.appendChild(metaLine(`📸 ${item.challengeSubmitterUsername ?? 'inconnu'}`, 1, true));
+      leftCol.appendChild(metaLine(formatGps(item.challengeLocation), 0.65));
+      leftCol.appendChild(metaLine('Photo originale', 0.5));
+
+      // Flèche centrale
+      const arrow = document.createElement('div');
+      arrow.textContent = '→';
+      arrow.style.cssText = 'font-size:16px; opacity:0.5; padding-top:20px; align-self:center;';
+
+      // Colonne droite : photo réponse
+      const rightCol = document.createElement('div');
+      rightCol.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
+      rightCol.appendChild(makeThumb(item.dataUrl, 'Réponse', '100%'));
+      rightCol.appendChild(metaLine(`🎯 ${item.submitterUsername ?? 'inconnu'}`, 1, true));
+      rightCol.appendChild(metaLine(formatGps(item.location), 0.65));
+      rightCol.appendChild(metaLine(new Date(item.createdAt).toLocaleString('fr-FR', { hour12: false }), 0.55));
+
+      tandem.appendChild(leftCol);
+      tandem.appendChild(arrow);
+      tandem.appendChild(rightCol);
+      row.appendChild(tandem);
+    } else {
+      // ── Simple : contribution seule ──────────────────────────────────────
+      const simple = document.createElement('div');
+      simple.style.cssText = 'display:grid; grid-template-columns:56px 1fr; gap:8px; align-items:start;';
+      simple.appendChild(makeThumb(item.dataUrl, 'Photo'));
+      const meta = document.createElement('div');
+      meta.style.cssText = 'display:flex; flex-direction:column; gap:2px; font-size:11px;';
+      meta.appendChild(metaLine(`📸 ${item.submitterUsername ?? 'inconnu'}`, 1, true));
+      meta.appendChild(metaLine(new Date(item.createdAt).toLocaleString('fr-FR', { hour12: false }), 0.7));
+      meta.appendChild(metaLine(formatGps(item.location), 0.65));
+      simple.appendChild(meta);
+      row.appendChild(simple);
+    }
+
+    // Actions (validate/discard pour buckets 1 et 3)
+    const isPending = bucketId === 1 || bucketId === 3;
+    if (isPending) {
+      const actionsRow = document.createElement('div');
+      actionsRow.style.cssText = 'display:flex; gap:6px; align-items:center;';
+
+      const validateBtn = makeBtn('✓ Valider', '#86efac');
+      const discardBtn  = makeBtn('✕ Rejeter', '#fca5a5');
+      const statusEl    = document.createElement('div');
+      statusEl.style.cssText = 'font-size:10px; opacity:0.8;';
+
+      validateBtn.addEventListener('click', async () => {
+        await handleReview({ photoId: item.id, action: 'validate', validateBtn, discardBtn, statusEl });
+        loadBucket(bucketId);
+      });
+      discardBtn.addEventListener('click', async () => {
+        await handleReview({ photoId: item.id, action: 'discard', validateBtn, discardBtn, statusEl });
+        loadBucket(bucketId);
+      });
+
+      actionsRow.appendChild(validateBtn);
+      actionsRow.appendChild(discardBtn);
+      actionsRow.appendChild(statusEl);
+      row.appendChild(actionsRow);
+    }
+
+    return row;
+  }
+
+  async function handleReview({ photoId, action, validateBtn, discardBtn, statusEl }) {
+    validateBtn.disabled = true;
+    discardBtn.disabled  = true;
+    statusEl.textContent = 'Enregistrement…';
     try {
-      await reviewSubmission({ submissionId, action });
-      actionStatus.textContent = 'Saved';
-      await refresh();
-    } catch (error) {
-      actionStatus.textContent = error.message || 'Failed';
-      validateButton.disabled = false;
-      discardButton.disabled = false;
+      await reviewPhoto({ photoId, action });
+      statusEl.textContent = action === 'validate' ? 'Validé ✓' : 'Rejeté ✕';
+    } catch (err) {
+      statusEl.textContent = err.message || 'Erreur';
+      validateBtn.disabled = false;
+      discardBtn.disabled  = false;
     }
   }
 
+  // ── Events ───────────────────────────────────────────────────────────────
+  openButton.addEventListener('click', () => {
+    const isOpen = panel.style.display !== 'none';
+    panel.style.display = isOpen ? 'none' : 'flex';
+    if (!isOpen) {
+      updateTabStyles();
+      loadBucket(activeBucket);
+    }
+  });
+
+  refreshBtn.addEventListener('click', () => loadBucket(activeBucket));
+
+  // ── Public API ───────────────────────────────────────────────────────────
   function setVisible(visible) {
     root.style.display = visible ? 'flex' : 'none';
-    if (!visible) {
-      panel.style.display = 'none';
+    if (!visible) panel.style.display = 'none';
+  }
+
+  function refresh() {
+    if (panel.style.display !== 'none') {
+      loadBucket(activeBucket);
     }
   }
 
-  function remove() {
-    root.remove();
-  }
+  function remove() { root.remove(); }
 
   return { setVisible, refresh, remove };
 }
 
-function makeActionButton(text, background) {
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function makeBtn(text, background) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.textContent = text;
-  btn.style.background = background;
-  btn.style.color = '#111827';
-  btn.style.border = 'none';
-  btn.style.borderRadius = '6px';
-  btn.style.padding = '4px 8px';
-  btn.style.cursor = 'pointer';
-  btn.style.font = '11px system-ui, sans-serif';
+  btn.style.cssText = `
+    background:${background}; color:#111827; border:none; border-radius:6px;
+    padding:4px 8px; cursor:pointer; font:11px system-ui,sans-serif;
+  `;
   return btn;
+}
+
+function makeThumb(src, alt, width = '56px') {
+  const img = document.createElement('img');
+  img.src = src;
+  img.alt = alt;
+  img.style.cssText = `width:${width}; height:${width === '100%' ? '100px' : '56px'}; object-fit:cover; border-radius:6px; display:block;`;
+  return img;
+}
+
+function metaLine(text, opacity = 1, bold = false) {
+  const el = document.createElement('div');
+  el.textContent = text;
+  el.style.cssText = `opacity:${opacity}; font-size:11px;${bold ? ' font-weight:600;' : ''}`;
+  return el;
+}
+
+function formatGps(loc) {
+  if (!loc) return 'GPS inconnu';
+  const lat = Number(loc.lat).toFixed(5);
+  const lon = Number(loc.lon ?? loc.lng ?? 0).toFixed(5);
+  return `📍 ${lat}, ${lon}`;
 }
