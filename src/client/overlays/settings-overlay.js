@@ -148,37 +148,10 @@ export function createSettingsOverlay({
   panel.appendChild(makeDivider());
 
   // ── Règlement ─────────────────────────────────────────────────────────────
-  const rulesSection = document.createElement('div');
-  rulesSection.style.cssText = 'display:flex; flex-direction:column; gap:6px;';
-
-  const rulesToggleBtn = makeBtn('📖 Règles du jeu', 'rgba(255,255,255,0.1)');
-  rulesToggleBtn.style.color = '#fff';
-  rulesToggleBtn.style.width = '100%';
-  rulesSection.appendChild(rulesToggleBtn);
-
-  const rulesContent = document.createElement('div');
-  rulesContent.style.cssText = `
-    display:none; font-size:11px; line-height:1.6; color:rgba(255,255,255,0.85);
-    background:rgba(0,0,0,0.3); border-radius:6px; padding:8px 10px;
-  `;
-  rulesContent.innerHTML = `
-    <b>Comment jouer ?</b><br>
-    1. Prends une photo sur le campus EPFL avec ta localisation GPS activée.<br>
-    2. Soumets-la — elle entre en validation admin.<br>
-    3. Si acceptée, ta photo devient un <b>challenge</b> pour les autres joueurs.<br>
-    4. Reçois un challenge : retrouve le lieu de la photo et prends-y ta propre photo !<br><br>
-    <b>Système de points</b><br>
-    <span style="color:#86efac">+5 pts</span> — Photo contribution soumise<br>
-    <span style="color:#86efac">+25 pts</span> — Challenge réussi (bonne localisation)<br>
-    <span style="color:#fca5a5">−2 pts</span> — Mauvaise réponse au challenge<br>
-    <span style="color:#fbbf24">+100 pts</span> — Personne n'a trouvé le lieu de ta photo !<br><br>
-    <b>Règles</b><br>
-    • GPS obligatoire pour soumettre.<br>
-    • Une seule réponse par challenge.<br>
-    • L'admin valide ou rejette chaque photo.
-  `;
-  rulesSection.appendChild(rulesContent);
-  panel.appendChild(rulesSection);
+  const rulesBtn = makeBtn('📖 Règles du jeu', 'rgba(255,255,255,0.1)');
+  rulesBtn.style.color = '#fff';
+  rulesBtn.style.width = '100%';
+  panel.appendChild(rulesBtn);
 
   // ── Score events ──────────────────────────────────────────────────────────
   let lbVisible = false;
@@ -240,11 +213,8 @@ export function createSettingsOverlay({
     if (lbVisible) await loadLeaderboard();
   });
 
-  let rulesVisible = false;
-  rulesToggleBtn.addEventListener('click', () => {
-    rulesVisible = !rulesVisible;
-    rulesContent.style.display = rulesVisible ? 'block' : 'none';
-    rulesToggleBtn.textContent = rulesVisible ? '🔼 Fermer les règles' : '📖 Règles du jeu';
+  rulesBtn.addEventListener('click', () => {
+    window.open('/reglement.html', '_blank');
   });
 
   // ── Event handlers ────────────────────────────────────────────────────────
