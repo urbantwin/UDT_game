@@ -34,6 +34,17 @@ export async function reviewPhoto({ photoId, action, note } = {}) {
   return data;
 }
 
+export async function awardUnbeaten(photoId) {
+  if (!photoId) throw new Error('Missing photo id.');
+  const res = await fetch(`${getApiBase()}/api/admin/photos/${photoId}/award-unbeaten`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || 'Failed to award unbeaten.');
+  return data;
+}
+
 // ── LEGACY (conservé pour compatibilité) ─────────────────────────────────
 export async function getAdminSubmissions() {
   const res = await fetch(`${getApiBase()}/api/admin/submissions`, {

@@ -1,4 +1,4 @@
-import { getAdminPhotosByBucket, reviewPhoto } from '../services/admin-api.js';
+import { getAdminPhotosByBucket, reviewPhoto, awardUnbeaten } from '../services/admin-api.js';
 
 const BUCKETS = [
   { id: 1, label: '① Contributions en attente',  color: '#fbbf24' },
@@ -192,7 +192,7 @@ export function createAdminGalleryView({ container = document.body } = {}) {
       row.appendChild(simple);
     }
 
-    // Actions (validate/discard pour buckets 1 et 3)
+    // Actions validate/discard (buckets 1 et 3)
     const isPending = bucketId === 1 || bucketId === 3;
     if (isPending) {
       const actionsRow = document.createElement('div');
@@ -214,6 +214,33 @@ export function createAdminGalleryView({ container = document.body } = {}) {
 
       actionsRow.appendChild(validateBtn);
       actionsRow.appendChild(discardBtn);
+      actionsRow.appendChild(statusEl);
+      row.appendChild(actionsRow);
+    }
+
+    // Bouton "Aucun vainqueur" pour le bucket 2 uniquement (+100 pts au soumetteur)
+    if (bucketId === 2) {
+      const actionsRow = document.createElement('div');
+      actionsRow.style.cssText = 'display:flex; gap:6px; align-items:center;';
+
+      const unbeatenBtn = makeBtn('🏆 Aucun vainqueur (+100 pts)', '#fbbf24');
+      const statusEl    = document.createElement('div');
+      statusEl.style.cssText = 'font-size:10px; opacity:0.8;';
+
+      unbeatenBtn.addEventListener('click', async () => {
+        unbeatenBtn.disabled = true;
+        statusEl.textContent = 'Attribution…';
+        try {
+          await awardUnbeaten(item.id);
+          statusEl.textContent = '✓ +100 pts attribués';
+          setTimeout(() => loadBucket(bucketId), 1000);
+        } catch (err) {
+          statusEl.textContent = err.message || 'Erreur';
+          unbeatenBtn.disabled = false;
+        }
+      });
+
+      actionsRow.appendChild(unbeatenBtn);
       actionsRow.appendChild(statusEl);
       row.appendChild(actionsRow);
     }

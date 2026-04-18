@@ -1,5 +1,5 @@
 // Settings dropdown panel — opened by the ⚙️ button in time-overlay.
-// Contains: login/register/logout, gallery shortcut, notifs toggle, test notif.
+// Contains: login/register/logout, gallery, notifs, score & leaderboard, règlement.
 
 import {
   login,
@@ -7,6 +7,7 @@ import {
   clearSession,
   getStoredUser,
 } from '../services/auth-api.js';
+import { getLeaderboard, getMyScore } from '../services/leaderboard-api.js';
 
 const NOTIFS_KEY = 'udt-notifs-enabled';
 
@@ -92,6 +93,160 @@ export function createSettingsOverlay({
   panel.appendChild(notifsBtn);
   panel.appendChild(testNotifBtn);
 
+  panel.appendChild(makeDivider());
+
+  // ── Score & Classement ────────────────────────────────────────────────────
+  const scoreSection = document.createElement('div');
+  scoreSection.style.cssText = 'display:flex; flex-direction:column; gap:6px;';
+
+  const scoreHeader = document.createElement('div');
+  scoreHeader.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+
+  const scoreTitle = document.createElement('span');
+  scoreTitle.textContent = '🏆 Score & Classement';
+  scoreTitle.style.cssText = 'font-weight:600; font-size:12px;';
+
+  const refreshScoreBtn = document.createElement('button');
+  refreshScoreBtn.type = 'button';
+  refreshScoreBtn.textContent = '↻';
+  refreshScoreBtn.title = 'Actualiser';
+  refreshScoreBtn.style.cssText = `
+    background:transparent; border:none; color:#9ca3af; cursor:pointer;
+    font-size:14px; padding:0; line-height:1;
+  `;
+
+  scoreHeader.appendChild(scoreTitle);
+  scoreHeader.appendChild(refreshScoreBtn);
+  scoreSection.appendChild(scoreHeader);
+
+  // Ligne "Mon score: X pts | Rang: #Y"
+  const myScoreEl = document.createElement('div');
+  myScoreEl.style.cssText = `
+    font-size:12px; background:rgba(255,255,255,0.07);
+    border-radius:6px; padding:6px 8px; line-height:1.6;
+  `;
+  myScoreEl.textContent = 'Connectez-vous pour voir votre score.';
+  scoreSection.appendChild(myScoreEl);
+
+  // Bouton pour afficher/masquer le classement complet
+  const toggleLbBtn = makeBtn('📋 Voir le classement', 'rgba(255,255,255,0.1)');
+  toggleLbBtn.style.color = '#fff';
+  toggleLbBtn.style.width = '100%';
+  scoreSection.appendChild(toggleLbBtn);
+
+  // Zone classement (masquée par défaut)
+  const lbList = document.createElement('div');
+  lbList.style.cssText = `
+    display:none; flex-direction:column; gap:2px;
+    max-height:200px; overflow-y:auto;
+    background:rgba(0,0,0,0.3); border-radius:6px; padding:4px;
+  `;
+  scoreSection.appendChild(lbList);
+
+  panel.appendChild(scoreSection);
+
+  panel.appendChild(makeDivider());
+
+  // ── Règlement ─────────────────────────────────────────────────────────────
+  const rulesSection = document.createElement('div');
+  rulesSection.style.cssText = 'display:flex; flex-direction:column; gap:6px;';
+
+  const rulesToggleBtn = makeBtn('📖 Règles du jeu', 'rgba(255,255,255,0.1)');
+  rulesToggleBtn.style.color = '#fff';
+  rulesToggleBtn.style.width = '100%';
+  rulesSection.appendChild(rulesToggleBtn);
+
+  const rulesContent = document.createElement('div');
+  rulesContent.style.cssText = `
+    display:none; font-size:11px; line-height:1.6; color:rgba(255,255,255,0.85);
+    background:rgba(0,0,0,0.3); border-radius:6px; padding:8px 10px;
+  `;
+  rulesContent.innerHTML = `
+    <b>Comment jouer ?</b><br>
+    1. Prends une photo sur le campus EPFL avec ta localisation GPS activée.<br>
+    2. Soumets-la — elle entre en validation admin.<br>
+    3. Si acceptée, ta photo devient un <b>challenge</b> pour les autres joueurs.<br>
+    4. Reçois un challenge : retrouve le lieu de la photo et prends-y ta propre photo !<br><br>
+    <b>Système de points</b><br>
+    <span style="color:#86efac">+5 pts</span> — Photo contribution soumise<br>
+    <span style="color:#86efac">+25 pts</span> — Challenge réussi (bonne localisation)<br>
+    <span style="color:#fca5a5">−2 pts</span> — Mauvaise réponse au challenge<br>
+    <span style="color:#fbbf24">+100 pts</span> — Personne n'a trouvé le lieu de ta photo !<br><br>
+    <b>Règles</b><br>
+    • GPS obligatoire pour soumettre.<br>
+    • Une seule réponse par challenge.<br>
+    • L'admin valide ou rejette chaque photo.
+  `;
+  rulesSection.appendChild(rulesContent);
+  panel.appendChild(rulesSection);
+
+  // ── Score events ──────────────────────────────────────────────────────────
+  let lbVisible = false;
+
+  async function loadMyScore() {
+    if (!currentUser) {
+      myScoreEl.textContent = 'Connectez-vous pour voir votre score.';
+      return;
+    }
+    myScoreEl.textContent = '…';
+    try {
+      const data = await getMyScore();
+      if (data) {
+        myScoreEl.innerHTML =
+          `<b>${currentUser.username}</b><br>` +
+          `🏅 <b>${data.score} pts</b> &nbsp;|&nbsp; Rang : <b>#${data.rank}</b>`;
+      } else {
+        myScoreEl.textContent = 'Score indisponible.';
+      }
+    } catch {
+      myScoreEl.textContent = 'Erreur de chargement.';
+    }
+  }
+
+  async function loadLeaderboard() {
+    lbList.innerHTML = '<div style="opacity:0.6;font-size:11px;padding:4px">Chargement…</div>';
+    try {
+      const rows = await getLeaderboard();
+      lbList.innerHTML = '';
+      if (!rows.length) {
+        lbList.innerHTML = '<div style="opacity:0.6;font-size:11px;padding:4px">Aucun joueur.</div>';
+        return;
+      }
+      for (const p of rows) {
+        const entry = document.createElement('div');
+        entry.style.cssText = `
+          display:flex; justify-content:space-between; align-items:center;
+          padding:3px 6px; border-radius:4px; font-size:11px;
+          background:${currentUser?.username === p.username ? 'rgba(96,165,250,0.2)' : 'transparent'};
+        `;
+        const medal = p.rank === 1 ? '🥇' : p.rank === 2 ? '🥈' : p.rank === 3 ? '🥉' : `#${p.rank}`;
+        entry.innerHTML = `<span>${medal} ${p.username}</span><span style="font-weight:600">${p.score} pts</span>`;
+        lbList.appendChild(entry);
+      }
+    } catch {
+      lbList.innerHTML = '<div style="color:#fca5a5;font-size:11px;padding:4px">Erreur de chargement.</div>';
+    }
+  }
+
+  toggleLbBtn.addEventListener('click', async () => {
+    lbVisible = !lbVisible;
+    lbList.style.display = lbVisible ? 'flex' : 'none';
+    toggleLbBtn.textContent = lbVisible ? '🔼 Masquer le classement' : '📋 Voir le classement';
+    if (lbVisible) await loadLeaderboard();
+  });
+
+  refreshScoreBtn.addEventListener('click', async () => {
+    await loadMyScore();
+    if (lbVisible) await loadLeaderboard();
+  });
+
+  let rulesVisible = false;
+  rulesToggleBtn.addEventListener('click', () => {
+    rulesVisible = !rulesVisible;
+    rulesContent.style.display = rulesVisible ? 'block' : 'none';
+    rulesToggleBtn.textContent = rulesVisible ? '🔼 Fermer les règles' : '📖 Règles du jeu';
+  });
+
   // ── Event handlers ────────────────────────────────────────────────────────
   loginBtn.addEventListener('click', async () => {
     try {
@@ -104,6 +259,7 @@ export function createSettingsOverlay({
       passwordInput.value = '';
       authStatus.textContent = 'Connecté !';
       refreshAuthUi();
+      loadMyScore();
       onAuthChange?.(currentUser);
     } catch (err) {
       authStatus.textContent = err.message;
@@ -121,6 +277,7 @@ export function createSettingsOverlay({
       passwordInput.value = '';
       authStatus.textContent = 'Compte créé !';
       refreshAuthUi();
+      loadMyScore();
       onAuthChange?.(currentUser);
     } catch (err) {
       authStatus.textContent = err.message;
@@ -132,6 +289,7 @@ export function createSettingsOverlay({
     currentUser = null;
     authStatus.textContent = 'Déconnecté.';
     refreshAuthUi();
+    loadMyScore();
     onAuthChange?.(null);
   });
 
@@ -228,6 +386,7 @@ export function createSettingsOverlay({
   function setUser(user) {
     currentUser = user ?? null;
     refreshAuthUi();
+    loadMyScore();
   }
 
   function remove() {

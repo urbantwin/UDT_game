@@ -153,9 +153,24 @@ export async function getDb() {
     await run(_db, 'ALTER TABLE notifications ADD COLUMN photoId INTEGER REFERENCES photos(id)');
   } catch {}
 
+  // Colonne score sur users
+  try {
+    await run(_db, 'ALTER TABLE users ADD COLUMN score INTEGER NOT NULL DEFAULT 0');
+  } catch {}
+
   await ensureDevAccount(_db);
 
   return _db;
+}
+
+// ── Score helpers ─────────────────────────────────────────────────────────────
+
+export async function updateScore(db, userId, delta) {
+  if (!userId || !delta) return;
+  await run(db,
+    'UPDATE users SET score = MAX(0, score + ?) WHERE id = ?',
+    [delta, userId]
+  );
 }
 
 async function ensureDevAccount(db) {

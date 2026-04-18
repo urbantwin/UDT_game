@@ -2,7 +2,7 @@
 import cors from 'cors';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
-import { getDb, run, all } from './db.js';
+import { getDb, run, all, updateScore } from './db.js';
 import { hashPassword, verifyPassword, createToken, requireAuth, getTokenConfig } from './auth.js';
 import { CHALLENGE_WINDOW, GAME_SETTINGS, SUBMISSION_WINDOW, getTodayLocation } from '../../game/game-config.js';
 import { getLocationById } from '../../game/epfl-locations.js';
@@ -276,6 +276,8 @@ app.post('/api/photos/contribute', requireAuth, async (req, res) => {
       [req.user.id, clientId ?? null, createdAt, width ?? null, height ?? null,
        type ?? 'image/png', JSON.stringify(location), dataUrl]
     );
+    // +5 pts pour chaque photo contribution soumise
+    await updateScore(db, req.user.id, 5);
     res.json({ id: result.lastID });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -395,12 +397,21 @@ app.post('/api/admin/photos/:id/review', requireAuth, requireDevAccess, async (r
       );
     }
 
+    // ── Points de score ──────────────────────────────────────────────────────
+    if (existing.category === 'response' && existing.userId) {
+      if (normalizedAction === 'validate') {
+        await updateScore(db, existing.userId, 25);  // +25 challenge réussi
+      } else {
+        await updateScore(db, existing.userId, -2);  // -2 mauvais lieu
+      }
+    }
+
     // Envoyer une notification au joueur propriétaire de la photo
     if (existing.userId) {
       const notifMessage = buildReviewNotification(existing.category, normalizedAction, reviewNote);
       if (notifMessage) {
         const notifType = `${existing.category}_${normalizedAction === 'validate' ? 'validated' : 'discarded'}`;
-      await run(db,
+        await run(db,
           'INSERT INTO notifications (userId, type, message, photoId, createdAt) VALUES (?, ?, ?, ?, ?)',
           [existing.userId, notifType, notifMessage, photoId, Date.now()]
         );
@@ -721,6 +732,83 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
 }
 
 // â”€â”€ WEBSOCKET & SERVER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// ── SCORE & CLASSEMENT ───────────────────────────────────────────────────────
+
+// POST /api/admin/photos/:id/award-unbeaten → +100 au soumetteur original (personne n'a trouvé)
+app.post('/api/admin/photos/:id/award-unbeaten', requireAuth, requireDevAccess, async (req, res) => {
+  const photoId = Number(req.params.id);
+  if (!Number.isInteger(photoId) || photoId <= 0) {
+    res.status(400).json({ error: 'Invalid photo id.' });
+    return;
+  }
+  try {
+    const db = await getDb();
+    const photo = await getPhotoById(db, photoId);
+    if (!photo) {
+      res.status(404).json({ error: 'Photo not found.' });
+      return;
+    }
+    if (photo.category !== 'contribution' || photo.status !== 'validated') {
+      res.status(400).json({ error: 'Only validated contribution photos (bucket 2) can be awarded.' });
+      return;
+    }
+    // Marquer la photo comme 'closed' (sort du bucket 2, ne sera plus servie)
+    await run(db, "UPDATE photos SET status = 'closed' WHERE id = ?", [photoId]);
+
+    // +100 pts au soumetteur original
+    if (photo.userId) {
+      await updateScore(db, photo.userId, 100);
+      // Notification
+      await run(db,
+        'INSERT INTO notifications (userId, type, message, photoId, createdAt) VALUES (?, ?, ?, ?, ?)',
+        [photo.userId, 'unbeaten',
+         '🏆 Incroyable ! Personne n\'a trouvé le lieu de ta photo. Tu gagnes 100 points !',
+         photoId, Date.now()]
+      );
+    }
+    res.json({ ok: true, photoId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/leaderboard → classement de tous les joueurs
+app.get('/api/leaderboard', async (_req, res) => {
+  try {
+    const db = await getDb();
+    const rows = await all(db,
+      `SELECT username, score,
+         ROW_NUMBER() OVER (ORDER BY score DESC) AS rank
+       FROM users
+       ORDER BY score DESC
+       LIMIT 100`
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/me/score → score et rang du joueur connecté
+app.get('/api/me/score', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const row = (await all(db,
+      `SELECT score,
+         (SELECT COUNT(*) + 1 FROM users u2 WHERE u2.score > u.score) AS rank
+       FROM users u WHERE u.id = ?`,
+      [req.user.id]
+    ))[0];
+    if (!row) {
+      res.status(404).json({ error: 'User not found.' });
+      return;
+    }
+    res.json({ score: row.score, rank: row.rank });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ── NOTIFICATIONS ─────────────────────────────────────────────────────────
 
