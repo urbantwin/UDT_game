@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:https": "set DEV_HTTPS=1&& vite",
     "server": "node src/server/index.js",
     "dev:full": "concurrently \"npm run server\" \"npm run dev\"",
+    "dev:full:https": "concurrently \"npm run server\" \"npm run dev:https\"",
+    "https:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-dev-https.ps1",
     "build": "vite build",
     "preview": "vite preview"
   },

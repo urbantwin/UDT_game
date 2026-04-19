@@ -40,8 +40,7 @@ export function createCameraController({ container, onPhotoSaved } = {}) {
       overlay.setStatus('Ready');
     } catch (error) {
       console.warn('Camera error:', error);
-      overlay.setStatus('Camera unavailable.');
-      overlay.hide();
+      overlay.setStatus(error?.message || 'Camera unavailable.');
     } finally {
       opening = false;
     }
