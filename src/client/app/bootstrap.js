@@ -8,6 +8,7 @@ import { createTimeOverlay } from '../overlays/time-overlay.js';
 import { createAuthOverlay } from '../overlays/auth-overlay.js';
 import { createSettingsOverlay } from '../overlays/settings-overlay.js';
 import { createChallengeOverlay } from '../overlays/challenge-overlay.js';
+import { createBottomNav } from '../overlays/bottom-nav.js';
 import { createCameraController } from '../camera/camera-controller.js';
 import { createGalleryView } from '../gallery/gallery-view.js';
 import { createAdminGalleryView } from '../gallery/admin-gallery-view.js';
@@ -36,8 +37,6 @@ export function bootstrapApp() {
   const authOverlay = createAuthOverlay();
 
   // ── ID de la photo challenge en cours (mode réponse) ────────────────────
-  // null  → prochaine photo prise = contribution (Bucket 1)
-  // <id>  → prochaine photo prise = réponse au challenge (Bucket 3)
   let pendingChallengePhotoId = null;
 
   // ── Notification scheduler ───────────────────────────────────────────────
@@ -49,6 +48,14 @@ export function bootstrapApp() {
     },
   });
 
+  // ── Gallery (photos locales) ─────────────────────────────────────────────
+  const galleryView = createGalleryView({
+    onSubmit: async ({ photo }) => {
+      if (!state.player.id) throw new Error('Connexion requise.');
+      await contributePhoto(photo);
+    },
+  });
+
   // ── Settings overlay (dropdown under ⚙️) ────────────────────────────────
   const settingsOverlay = createSettingsOverlay({
     onAuthChange: (user) => {
@@ -57,6 +64,7 @@ export function bootstrapApp() {
       authOverlay.setUser(user);
       const isDev = user?.username === 'dev';
       adminGalleryView.setVisible(isDev);
+      bottomNav.setAdminVisible(isDev);
       if (isDev) adminGalleryView.refresh();
       notificationsOverlay.setLoggedIn(Boolean(user));
     },
@@ -80,14 +88,6 @@ export function bootstrapApp() {
     },
   });
 
-  // ── Gallery (photos locales) ─────────────────────────────────────────────
-  const galleryView = createGalleryView({
-    onSubmit: async ({ photo }) => {
-      if (!state.player.id) throw new Error('Connexion requise.');
-      await contributePhoto(photo);
-    },
-  });
-
   // ── Photo sync (WebSocket + REST) ────────────────────────────────────────
   const photoSync = createPhotoSync({
     onRemotePhoto: (photo) => {
@@ -99,14 +99,12 @@ export function bootstrapApp() {
   // ── Camera controller ────────────────────────────────────────────────────
   const cameraController = createCameraController({
     onPhotoSaved: async (photo) => {
-      // Affichage local immédiat
       photoMarkersLayer.addPhoto(photo);
       galleryView.addPhoto(photo);
 
       if (!state.player.id) return;
 
       if (pendingChallengePhotoId) {
-        // ── Mode réponse → Bucket 3 ──────────────────────────────────────
         const cpid = pendingChallengePhotoId;
         pendingChallengePhotoId = null;
         try {
@@ -115,16 +113,21 @@ export function bootstrapApp() {
           console.warn('[challenge] Réponse échouée:', err.message);
         }
       } else {
-        // ── Mode contribution → Bucket 1 ─────────────────────────────────
         try {
           await contributePhoto(photo);
         } catch (err) {
-          // Fallback si pas de GPS : tenter le sync générique
           console.warn('[challenge] Contribution échouée (GPS?):', err.message);
           photoSync.uploadPhoto(photo);
         }
       }
     },
+  });
+
+  // ── Bottom navigation bar ────────────────────────────────────────────────
+  const bottomNav = createBottomNav({
+    onCamera:    () => cameraController.open(),
+    onChallenge: () => challengeOverlay.openPanel(),
+    onAdmin:     () => adminGalleryView.togglePanel(),
   });
 
   // ── Restore session ──────────────────────────────────────────────────────
@@ -136,6 +139,7 @@ export function bootstrapApp() {
       settingsOverlay.setUser(user);
       const isDev = user?.username === 'dev';
       adminGalleryView.setVisible(isDev);
+      bottomNav.setAdminVisible(isDev);
       if (isDev) adminGalleryView.refresh();
       notificationsOverlay.setLoggedIn(Boolean(user));
     })
@@ -177,6 +181,7 @@ export function bootstrapApp() {
     photoSync.close();
     cameraController.remove();
     notificationsOverlay.remove();
+    bottomNav.remove();
     mapView.map.remove();
   };
 }

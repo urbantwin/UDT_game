@@ -1,81 +1,51 @@
 // Camera overlay UI: renders a video element and controls.
+// The open button is removed — camera is triggered by the bottom nav icon.
 
 export function createCameraOverlay({ container = document.body } = {}) {
   const root = document.createElement('div');
-  root.style.position = 'fixed';
-  root.style.right = '16px';
-  root.style.bottom = '16px';
-  root.style.zIndex = '1001';
-  root.style.display = 'flex';
-  root.style.flexDirection = 'column';
-  root.style.alignItems = 'flex-end';
-  root.style.gap = '8px';
-
-  const openButton = document.createElement('button');
-  openButton.type = 'button';
-  openButton.textContent = 'Camera';
-  openButton.style.background = '#9ca3af';
-  openButton.style.color = '#111827';
-  openButton.style.border = 'none';
-  openButton.style.borderRadius = '6px';
-  openButton.style.padding = '6px 10px';
-  openButton.style.cursor = 'pointer';
-  openButton.style.font = '12px system-ui, sans-serif';
-  root.appendChild(openButton);
+  root.style.cssText = `
+    position:fixed; right:16px; bottom:72px; z-index:1001;
+    display:flex; flex-direction:column; align-items:flex-end; gap:8px;
+  `;
 
   const panel = document.createElement('div');
-  panel.style.display = 'none';
-  panel.style.background = 'rgba(0, 0, 0, 0.75)';
-  panel.style.color = '#ffffff';
-  panel.style.padding = '8px';
-  panel.style.borderRadius = '10px';
-  panel.style.width = '240px';
-  panel.style.boxShadow = '0 6px 16px rgba(0, 0, 0, 0.35)';
-  panel.style.pointerEvents = 'auto';
+  panel.style.cssText = `
+    display:none; background:rgba(0,0,0,0.85); color:#fff;
+    padding:8px; border-radius:10px; width:240px;
+    box-shadow:0 6px 16px rgba(0,0,0,0.35); pointer-events:auto;
+  `;
 
   const video = document.createElement('video');
   video.autoplay = true;
   video.muted = true;
   video.playsInline = true;
-  video.style.width = '100%';
-  video.style.height = 'auto';
-  video.style.borderRadius = '8px';
+  video.style.cssText = 'width:100%; height:auto; border-radius:8px; display:block;';
   panel.appendChild(video);
 
   const controls = document.createElement('div');
-  controls.style.display = 'flex';
-  controls.style.gap = '6px';
-  controls.style.marginTop = '6px';
-  panel.appendChild(controls);
+  controls.style.cssText = 'display:flex; gap:6px; margin-top:6px;';
 
   const captureButton = document.createElement('button');
   captureButton.type = 'button';
-  captureButton.textContent = 'Take photo';
-  captureButton.style.background = '#f87171';
-  captureButton.style.color = '#111827';
-  captureButton.style.border = 'none';
-  captureButton.style.borderRadius = '6px';
-  captureButton.style.padding = '6px 8px';
-  captureButton.style.cursor = 'pointer';
-  captureButton.style.font = '12px system-ui, sans-serif';
+  captureButton.textContent = '📸 Prendre';
+  captureButton.style.cssText = `
+    background:#f87171; color:#111827; border:none; border-radius:6px;
+    padding:6px 8px; cursor:pointer; font:12px system-ui,sans-serif; flex:1;
+  `;
   controls.appendChild(captureButton);
 
   const closeButton = document.createElement('button');
   closeButton.type = 'button';
-  closeButton.textContent = 'Close';
-  closeButton.style.background = '#9ca3af';
-  closeButton.style.color = '#111827';
-  closeButton.style.border = 'none';
-  closeButton.style.borderRadius = '6px';
-  closeButton.style.padding = '6px 8px';
-  closeButton.style.cursor = 'pointer';
-  closeButton.style.font = '12px system-ui, sans-serif';
+  closeButton.textContent = '✕';
+  closeButton.style.cssText = `
+    background:#9ca3af; color:#111827; border:none; border-radius:6px;
+    padding:6px 10px; cursor:pointer; font:12px system-ui,sans-serif;
+  `;
   controls.appendChild(closeButton);
+  panel.appendChild(controls);
 
   const status = document.createElement('div');
-  status.style.marginTop = '6px';
-  status.style.font = '12px system-ui, sans-serif';
-  status.style.opacity = '0.85';
+  status.style.cssText = 'margin-top:6px; font:12px system-ui,sans-serif; opacity:0.85;';
   panel.appendChild(status);
 
   root.appendChild(panel);
@@ -85,20 +55,14 @@ export function createCameraOverlay({ container = document.body } = {}) {
   let onClose = null;
   let onCapture = null;
 
-  openButton.addEventListener('click', (event) => {
-    event.preventDefault();
-    panel.style.display = 'block';
-    onOpen?.();
-  });
-
-  closeButton.addEventListener('click', (event) => {
-    event.preventDefault();
+  closeButton.addEventListener('click', (e) => {
+    e.preventDefault();
     panel.style.display = 'none';
     onClose?.();
   });
 
-  captureButton.addEventListener('click', (event) => {
-    event.preventDefault();
+  captureButton.addEventListener('click', (e) => {
+    e.preventDefault();
     onCapture?.();
   });
 
@@ -118,19 +82,11 @@ export function createCameraOverlay({ container = document.body } = {}) {
   return {
     video,
     setStatus,
-    onOpen: (handler) => {
-      onOpen = handler;
-    },
-    onClose: (handler) => {
-      onClose = handler;
-    },
-    onCapture: (handler) => {
-      onCapture = handler;
-    },
-    hide: () => {
-      panel.style.display = 'none';
-    },
+    onOpen:    (h) => { onOpen = h; },
+    onClose:   (h) => { onClose = h; },
+    onCapture: (h) => { onCapture = h; },
+    hide:      () => { panel.style.display = 'none'; },
     openPanel,
-    remove
+    remove,
   };
 }

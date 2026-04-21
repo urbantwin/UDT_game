@@ -17,17 +17,7 @@ export function createGalleryView({ container = document.body, onSubmit } = {}) 
   root.style.alignItems = 'flex-end';
   root.style.gap = '8px';
 
-  const openButton = document.createElement('button');
-  openButton.type = 'button';
-  openButton.textContent = 'Gallery';
-  openButton.style.background = '#9ca3af';
-  openButton.style.color = '#111827';
-  openButton.style.border = 'none';
-  openButton.style.borderRadius = '6px';
-  openButton.style.padding = '6px 10px';
-  openButton.style.cursor = 'pointer';
-  openButton.style.font = '12px system-ui, sans-serif';
-  root.appendChild(openButton);
+  // Pas de bouton texte — la galerie s'ouvre depuis les paramètres ⚙️
 
   const panel = document.createElement('div');
   panel.style.display = 'none';
@@ -212,11 +202,6 @@ export function createGalleryView({ container = document.body, onSubmit } = {}) 
   function addPhoto(photo) {
     setPhotos([photo, ...currentPhotos]);
   }
-
-  openButton.addEventListener('click', (event) => {
-    event.preventDefault();
-    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-  });
 
   function open() {
     panel.style.display = 'block';

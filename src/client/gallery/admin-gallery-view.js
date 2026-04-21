@@ -14,15 +14,7 @@ export function createAdminGalleryView({ container = document.body } = {}) {
     display:none; flex-direction:column; align-items:flex-end; gap:8px;
   `;
 
-  // ── Toggle button ────────────────────────────────────────────────────────
-  const openButton = document.createElement('button');
-  openButton.type = 'button';
-  openButton.textContent = 'Admin';
-  openButton.style.cssText = `
-    background:#f59e0b; color:#111827; border:none; border-radius:6px;
-    padding:6px 10px; cursor:pointer; font:12px system-ui,sans-serif;
-  `;
-  root.appendChild(openButton);
+  // Le panneau est déclenché depuis la barre de navigation (pas de bouton texte ici)
 
   // ── Panel ────────────────────────────────────────────────────────────────
   const panel = document.createElement('div');
@@ -262,19 +254,18 @@ export function createAdminGalleryView({ container = document.body } = {}) {
     }
   }
 
-  // ── Events ───────────────────────────────────────────────────────────────
-  openButton.addEventListener('click', () => {
+  refreshBtn.addEventListener('click', () => loadBucket(activeBucket));
+
+  // ── Public API ───────────────────────────────────────────────────────────
+  function togglePanel() {
     const isOpen = panel.style.display !== 'none';
     panel.style.display = isOpen ? 'none' : 'flex';
     if (!isOpen) {
       updateTabStyles();
       loadBucket(activeBucket);
     }
-  });
+  }
 
-  refreshBtn.addEventListener('click', () => loadBucket(activeBucket));
-
-  // ── Public API ───────────────────────────────────────────────────────────
   function setVisible(visible) {
     root.style.display = visible ? 'flex' : 'none';
     if (!visible) panel.style.display = 'none';
@@ -288,7 +279,7 @@ export function createAdminGalleryView({ container = document.body } = {}) {
 
   function remove() { root.remove(); }
 
-  return { setVisible, refresh, remove };
+  return { setVisible, refresh, remove, togglePanel };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
