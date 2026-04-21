@@ -21,7 +21,7 @@ export function createSettingsOverlay({
 } = {}) {
   const panel = document.createElement('div');
   panel.style.cssText = `
-    position:fixed; top:50px; left:16px; z-index:1250;
+    position:fixed; top:50px; right:16px; z-index:1250;
     display:none; flex-direction:column; gap:8px;
     background:rgba(10,10,10,0.95); color:#fff;
     padding:12px; border-radius:10px; width:220px;

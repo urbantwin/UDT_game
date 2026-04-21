@@ -4,7 +4,7 @@
 export function createCameraOverlay({ container = document.body } = {}) {
   const root = document.createElement('div');
   root.style.cssText = `
-    position:fixed; right:16px; bottom:72px; z-index:1001;
+    position:fixed; right:16px; bottom:16px; z-index:1001;
     display:flex; flex-direction:column; align-items:flex-end; gap:8px;
   `;
 

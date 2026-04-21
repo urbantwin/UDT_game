@@ -1,5 +1,7 @@
-// Barre de navigation mobile en bas de l'écran — icônes uniquement.
-// Boutons : 🎯 Challenge | 📷 Caméra | 🔧 Admin (conditionnel)
+// Icônes de navigation flottantes (bas-gauche), au-dessus du logo EPFL Guessr.
+// Layout vertical bas-gauche :
+//   [🎯] [📷] [🔧?]   ← icônes
+//   [logo EPFL]        ← logo
 
 export function createBottomNav({
   container = document.body,
@@ -7,90 +9,75 @@ export function createBottomNav({
   onChallenge,
   onAdmin,
 } = {}) {
-  // ── Logo EPFL Guessr (bas-gauche, au-dessus de la nav) ───────────────────
+
+  // ── Logo EPFL Guessr ───────────────────────────────────────────────────────
   const logo = document.createElement('img');
   logo.src = '/logo.jpeg';
   logo.alt = 'EPFL Guessr';
   logo.style.cssText = `
-    position:fixed; left:14px; bottom:62px; z-index:1100;
-    height:40px; width:auto; border-radius:8px;
+    position:fixed; left:14px; bottom:14px; z-index:1100;
+    height:44px; width:auto; border-radius:10px;
     object-fit:contain;
-    box-shadow:0 2px 8px rgba(0,0,0,0.5);
+    box-shadow:0 2px 10px rgba(0,0,0,0.55);
     pointer-events:none;
   `;
   container.appendChild(logo);
 
-  // ── Barre de navigation ───────────────────────────────────────────────────
-  const nav = document.createElement('nav');
-  nav.style.cssText = `
-    position:fixed; bottom:0; left:0; right:0; z-index:1100;
-    height:58px;
-    background:rgba(10,10,10,0.92);
-    backdrop-filter:blur(12px);
-    -webkit-backdrop-filter:blur(12px);
-    border-top:1px solid rgba(255,255,255,0.08);
-    display:flex; align-items:center; justify-content:space-around;
-    padding:0 24px;
+  // ── Groupe d'icônes au-dessus du logo ────────────────────────────────────
+  const iconGroup = document.createElement('div');
+  iconGroup.style.cssText = `
+    position:fixed; left:14px; bottom:68px; z-index:1100;
+    display:flex; flex-direction:row; gap:8px; align-items:center;
   `;
-  container.appendChild(nav);
+  container.appendChild(iconGroup);
 
-  function makeNavBtn(icon, label, color = '#fff') {
+  function makeIconBtn(icon, color, title) {
     const btn = document.createElement('button');
     btn.type = 'button';
+    btn.title = title;
     btn.style.cssText = `
-      background:transparent; border:none; cursor:pointer;
-      display:flex; flex-direction:column; align-items:center; gap:3px;
-      padding:6px 16px; border-radius:12px;
-      transition:background 0.15s;
+      width:46px; height:46px; border-radius:50%;
+      background:rgba(10,10,10,0.88);
+      border:1.5px solid rgba(255,255,255,0.12);
+      display:flex; align-items:center; justify-content:center;
+      font-size:22px; cursor:pointer; line-height:1;
+      box-shadow:0 3px 10px rgba(0,0,0,0.45);
+      transition:transform 0.1s, background 0.15s;
       -webkit-tap-highlight-color:transparent;
+      outline:none;
     `;
-    btn.onmouseenter = () => btn.style.background = 'rgba(255,255,255,0.08)';
-    btn.onmouseleave = () => btn.style.background = 'transparent';
-
-    const iconEl = document.createElement('span');
-    iconEl.textContent = icon;
-    iconEl.style.cssText = 'font-size:22px; line-height:1;';
-
-    const labelEl = document.createElement('span');
-    labelEl.textContent = label;
-    labelEl.style.cssText = `font:600 9px system-ui,sans-serif; color:${color}; letter-spacing:0.3px; opacity:0.75;`;
-
-    btn.appendChild(iconEl);
-    btn.appendChild(labelEl);
+    btn.textContent = icon;
+    btn.onmouseenter  = () => btn.style.background = color;
+    btn.onmouseleave  = () => btn.style.background = 'rgba(10,10,10,0.88)';
+    btn.onmousedown   = () => btn.style.transform = 'scale(0.90)';
+    btn.onmouseup     = () => btn.style.transform = 'scale(1)';
+    btn.ontouchstart  = () => { btn.style.transform = 'scale(0.90)'; btn.style.background = color; };
+    btn.ontouchend    = () => { btn.style.transform = 'scale(1)'; btn.style.background = 'rgba(10,10,10,0.88)'; };
     return btn;
   }
 
-  // ── Bouton Challenge ───────────────────────────────────────────────────────
-  const challengeBtn = makeNavBtn('🎯', 'CHALLENGE', '#fbbf24');
+  // 🎯 Challenge
+  const challengeBtn = makeIconBtn('🎯', 'rgba(251,191,36,0.35)', 'Challenge');
   challengeBtn.addEventListener('click', () => onChallenge?.());
-  nav.appendChild(challengeBtn);
+  iconGroup.appendChild(challengeBtn);
 
-  // ── Bouton Caméra ─────────────────────────────────────────────────────────
-  const cameraBtn = document.createElement('button');
-  cameraBtn.type = 'button';
-  cameraBtn.style.cssText = `
-    background:#ef4444; border:none; cursor:pointer;
-    width:52px; height:52px; border-radius:50%;
-    display:flex; align-items:center; justify-content:center;
-    box-shadow:0 0 0 4px rgba(239,68,68,0.25), 0 4px 12px rgba(0,0,0,0.5);
-    font-size:24px; line-height:1;
-    transition:transform 0.1s, background 0.15s;
-    -webkit-tap-highlight-color:transparent;
-    margin-bottom:10px;
-  `;
-  cameraBtn.textContent = '📷';
-  cameraBtn.onmousedown = () => cameraBtn.style.transform = 'scale(0.92)';
-  cameraBtn.onmouseup   = () => cameraBtn.style.transform = 'scale(1)';
-  cameraBtn.ontouchstart = () => cameraBtn.style.transform = 'scale(0.92)';
-  cameraBtn.ontouchend   = () => cameraBtn.style.transform = 'scale(1)';
+  // 📷 Caméra (légèrement plus grand, rouge)
+  const cameraBtn = makeIconBtn('📷', 'rgba(239,68,68,0.45)', 'Caméra');
+  cameraBtn.style.width  = '52px';
+  cameraBtn.style.height = '52px';
+  cameraBtn.style.fontSize = '24px';
+  cameraBtn.style.background = 'rgba(185,28,28,0.75)';
+  cameraBtn.style.border = '2px solid rgba(239,68,68,0.5)';
+  cameraBtn.onmouseenter  = () => cameraBtn.style.background = 'rgba(239,68,68,0.9)';
+  cameraBtn.onmouseleave  = () => cameraBtn.style.background = 'rgba(185,28,28,0.75)';
   cameraBtn.addEventListener('click', () => onCamera?.());
-  nav.appendChild(cameraBtn);
+  iconGroup.appendChild(cameraBtn);
 
-  // ── Bouton Admin (caché par défaut) ───────────────────────────────────────
-  const adminBtn = makeNavBtn('🔧', 'ADMIN', '#f59e0b');
+  // 🔧 Admin (caché par défaut)
+  const adminBtn = makeIconBtn('🔧', 'rgba(245,158,11,0.35)', 'Admin');
   adminBtn.style.display = 'none';
   adminBtn.addEventListener('click', () => onAdmin?.());
-  nav.appendChild(adminBtn);
+  iconGroup.appendChild(adminBtn);
 
   // ── Public API ────────────────────────────────────────────────────────────
   function setAdminVisible(visible) {
@@ -98,7 +85,7 @@ export function createBottomNav({
   }
 
   function remove() {
-    nav.remove();
+    iconGroup.remove();
     logo.remove();
   }
 

@@ -4,7 +4,7 @@
 export function createAuthOverlay({ container = document.body } = {}) {
   const root = document.createElement('div');
   root.style.cssText = `
-    position:fixed; top:16px; right:70px; z-index:1200;
+    position:fixed; top:54px; right:16px; z-index:1200;
     background:rgba(0,0,0,0.6); color:#fff;
     padding:6px 10px; border-radius:8px;
     font:13px system-ui,sans-serif;
