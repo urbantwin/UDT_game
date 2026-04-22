@@ -19,7 +19,7 @@ export function createNotificationsOverlay({ container = document.body } = {}) {
   bellBtn.innerHTML = '🔔';
   bellBtn.title = 'Notifications';
   bellBtn.style.cssText = `
-    background:rgba(0,0,0,0.72); color:#fff; border:none; border-radius:50%;
+    background:rgba(255, 255, 255, 0.82); color:#fff; border:none; border-radius:50%;
     width:38px; height:38px; font-size:16px; cursor:pointer;
     display:flex; align-items:center; justify-content:center;
     box-shadow:0 2px 8px rgba(0,0,0,0.3);
@@ -41,7 +41,7 @@ export function createNotificationsOverlay({ container = document.body } = {}) {
   const panel = document.createElement('div');
   panel.style.cssText = `
     display:none; background:rgba(10,10,10,0.94); color:#fff;
-    border-radius:10px; width:280px;
+    border-radius:10px; width:230px;
     max-height:calc(100vh - 80px);
     box-shadow:0 6px 20px rgba(0,0,0,0.5);
     flex-direction:column; overflow:hidden;

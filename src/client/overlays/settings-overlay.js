@@ -21,7 +21,7 @@ export function createSettingsOverlay({
 } = {}) {
   const panel = document.createElement('div');
   panel.style.cssText = `
-    position:fixed; top:50px; right:16px; z-index:1250;
+    position:fixed; top:100px; right:16px; z-index:1250;
     display:none; flex-direction:column; gap:8px;
     background:rgba(10,10,10,0.95); color:#fff;
     padding:12px; border-radius:10px; width:220px;
@@ -76,7 +76,7 @@ export function createSettingsOverlay({
   panel.appendChild(authStatus);
 
   panel.appendChild(makeDivider());
-
+/*
   // ── Gallery ───────────────────────────────────────────────────────────────
   const galleryBtn = makeBtn('📷 Galerie', 'rgba(255,255,255,0.1)');
   galleryBtn.style.color = '#fff';
@@ -94,7 +94,7 @@ export function createSettingsOverlay({
   panel.appendChild(testNotifBtn);
 
   panel.appendChild(makeDivider());
-
+*/
   // ── Score & Classement ────────────────────────────────────────────────────
   const scoreSection = document.createElement('div');
   scoreSection.style.cssText = 'display:flex; flex-direction:column; gap:6px;';
@@ -263,7 +263,7 @@ export function createSettingsOverlay({
     loadMyScore();
     onAuthChange?.(null);
   });
-
+/*
   galleryBtn.addEventListener('click', () => {
     onOpenGallery?.();
     close();
@@ -298,7 +298,7 @@ export function createSettingsOverlay({
   });
 
   testNotifBtn.addEventListener('click', () => onTestNotif?.());
-
+*/
   // ── Helpers ───────────────────────────────────────────────────────────────
   function refreshAuthUi() {
     const loggedIn = Boolean(currentUser?.username);

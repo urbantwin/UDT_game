@@ -22,7 +22,7 @@ export function createChallengeOverlay({ container = document.body, onRequest, o
   // ── Panneau (bas-gauche, au-dessus de la nav bar) — caché par défaut ──────
   const root = document.createElement('div');
   root.style.cssText = `
-    position:fixed; left:130px; bottom:68px; z-index:1250;
+    position:fixed; left:20px; bottom:100px; z-index:1250;
     display:none; flex-direction:column; gap:8px;
   `;
 

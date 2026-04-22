@@ -57,12 +57,12 @@ export function createBottomNav({
   }
 
   // 🎯 Challenge
-  const challengeBtn = makeIconBtn('🎯', 'rgba(251,191,36,0.35)', 'Challenge');
+  const challengeBtn = makeIconBtn('🎯', 'rgb(255, 255, 255)', 'Challenge');
   challengeBtn.addEventListener('click', () => onChallenge?.());
   iconGroup.appendChild(challengeBtn);
 
   // 📷 Caméra (légèrement plus grand, rouge)
-  const cameraBtn = makeIconBtn('📷', 'rgba(239,68,68,0.45)', 'Caméra');
+  const cameraBtn = makeIconBtn('📷', 'rgb(255, 255, 255)', 'Caméra');
   cameraBtn.style.width  = '52px';
   cameraBtn.style.height = '52px';
   cameraBtn.style.fontSize = '24px';
