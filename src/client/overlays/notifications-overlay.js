@@ -6,7 +6,7 @@ export function createNotificationsOverlay({ container = document.body } = {}) {
   // ── Conteneur (coin haut-droit) ──────────────────────────────────────────
   const root = document.createElement('div');
   root.style.cssText = `
-    position:fixed; top:50px; right:16px; z-index:1400;
+    position:fixed; top:80px; left:16px; z-index:1400;
     display:none; flex-direction:column; align-items:flex-end; gap:6px;
   `;
 

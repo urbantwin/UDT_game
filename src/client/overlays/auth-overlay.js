@@ -4,8 +4,8 @@
 export function createAuthOverlay({ container = document.body } = {}) {
   const root = document.createElement('div');
   root.style.cssText = `
-    position:fixed; top:54px; right:16px; z-index:1200;
-    background:rgba(0,0,0,0.6); color:#fff;
+    position:fixed; top:68px; right:16px; z-index:1200;
+    background:rgb(254, 255, 183); color:#fff;
     padding:6px 10px; border-radius:8px;
     font:13px system-ui,sans-serif;
     display:flex; align-items:center; gap:5px;
@@ -18,6 +18,7 @@ export function createAuthOverlay({ container = document.body } = {}) {
 
   const label = document.createElement('span');
   label.textContent = ': Non connecté';
+  label.style.color = 'black';
   root.appendChild(label);
 
   container.appendChild(root);

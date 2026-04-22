@@ -5,6 +5,7 @@ import L from 'leaflet';
 export function createUserLocationLayer(map) {
   let marker = null;
   let accuracyCircle = null;
+  const ACCURACY_VISUAL_SCALE = 0.35;
 
   function setLocation({ lat, lon, accuracy }) {
     const latlng = L.latLng(lat, lon);
@@ -22,7 +23,7 @@ export function createUserLocationLayer(map) {
 
       // Cercle de précision GPS (zone floue autour du joueur)
       accuracyCircle = L.circle(latlng, {
-        radius: accuracy || 20,
+        radius: (accuracy || 20) * ACCURACY_VISUAL_SCALE,
         fillColor: '#e11d48',
         color: '#e11d48',
         weight: 1,
@@ -32,7 +33,7 @@ export function createUserLocationLayer(map) {
     } else {
       marker.setLatLng(latlng);
       accuracyCircle.setLatLng(latlng);
-      if (accuracy) accuracyCircle.setRadius(accuracy);
+      accuracyCircle.setRadius((accuracy || 20) * ACCURACY_VISUAL_SCALE);
     }
   }
 

@@ -15,8 +15,8 @@ export function createBottomNav({
   logo.src = '/logo.jpeg';
   logo.alt = 'EPFL Guessr';
   logo.style.cssText = `
-    position:fixed; left:14px; bottom:14px; z-index:1100;
-    height:44px; width:auto; border-radius:10px;
+    position:fixed; left:50px; top:14px; z-index:1100;
+    height:60px; width:auto; border-radius:10px;
     object-fit:contain;
     box-shadow:0 2px 10px rgba(0,0,0,0.55);
     pointer-events:none;
@@ -26,7 +26,7 @@ export function createBottomNav({
   // ── Groupe d'icônes au-dessus du logo ────────────────────────────────────
   const iconGroup = document.createElement('div');
   iconGroup.style.cssText = `
-    position:fixed; left:14px; bottom:68px; z-index:1100;
+    position:fixed; left:14px; bottom:32px; z-index:1100;
     display:flex; flex-direction:row; gap:8px; align-items:center;
   `;
   container.appendChild(iconGroup);

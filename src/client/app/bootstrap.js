@@ -3,7 +3,6 @@
 import { mapConfig } from '../map/map-config.js';
 import { createMapView } from '../map/map-view.js';
 import { createUserLocationLayer } from '../overlays/user-location-layer.js';
-import { createPhotoMarkersLayer } from '../overlays/photo-markers-layer.js';
 import { createTimeOverlay } from '../overlays/time-overlay.js';
 import { createAuthOverlay } from '../overlays/auth-overlay.js';
 import { createSettingsOverlay } from '../overlays/settings-overlay.js';
@@ -26,7 +25,11 @@ export function bootstrapApp() {
   state.map = mapView.map;
 
   const userLocationLayer    = createUserLocationLayer(mapView.map);
-  const photoMarkersLayer    = createPhotoMarkersLayer(mapView.map);
+  const photoMarkersLayer    = {
+    addPhoto: () => {},
+    setPhotos: () => {},
+    remove: () => {},
+  };
   const adminGalleryView     = createAdminGalleryView();
   const notificationsOverlay = createNotificationsOverlay();
 
