@@ -6,18 +6,19 @@ import {
   savePhotoRecord,
   updatePhotoRecord
 } from './photo-store.js';
-import { authHeaders, getStoredToken } from './auth-api.js';
+import { authHeaders, getStoredUser } from './auth-api.js';
 
 function getApiBase() {
   if (import.meta.env.DEV) {
-    return `http://${location.hostname}:3001`;
+    return `${location.protocol}//${location.hostname}:3001`;
   }
   return '';
 }
 
 function getWsUrl() {
   if (import.meta.env.DEV) {
-    return `ws://${location.hostname}:3001/ws`;
+    const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${protocol}://${location.hostname}:3001/ws`;
   }
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   return `${proto}://${location.host}/ws`;
@@ -77,7 +78,7 @@ export function createPhotoSync({ onRemotePhoto } = {}) {
 
   async function uploadPhoto(localPhoto) {
     if (!localPhoto?.blob) return;
-    if (!getStoredToken()) return null;
+    if (!getStoredUser()) return null;
     try {
       const dataUrl = await blobToDataUrl(localPhoto.blob);
       const payload = {
@@ -92,6 +93,7 @@ export function createPhotoSync({ onRemotePhoto } = {}) {
 
       const res = await fetch(`${apiBase}/api/photos`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(payload)
       });

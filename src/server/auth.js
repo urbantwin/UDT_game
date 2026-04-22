@@ -1,9 +1,7 @@
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-change-me';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 const SALT_ROUNDS = 12;
+const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS ?? 7 * 24 * 60 * 60 * 1000);
 
 export async function hashPassword(password) {
   return await bcrypt.hash(password, SALT_ROUNDS);
@@ -13,39 +11,71 @@ export async function verifyPassword(password, passwordHash) {
   return await bcrypt.compare(password, passwordHash);
 }
 
-export function createToken(user) {
-  return jwt.sign(
-    {
-      sub: String(user.id),
-      username: user.username
-    },
-    JWT_SECRET,
-    { expiresIn: JWT_EXPIRES_IN }
-  );
+function normalizeSessionUser(user) {
+  return {
+    id: Number(user.id),
+    username: user.username
+  };
+}
+
+function regenerateSession(req) {
+  return new Promise((resolve, reject) => {
+    req.session.regenerate((err) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function saveSession(req) {
+  return new Promise((resolve, reject) => {
+    req.session.save((err) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+export async function createUserSession(req, user) {
+  await regenerateSession(req);
+  req.session.user = normalizeSessionUser(user);
+  await saveSession(req);
 }
 
 export function requireAuth(req, res, next) {
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
-  if (!token) {
-    res.status(401).json({ error: 'Missing auth token.' });
+  const user = req.session?.user;
+  if (!user || !Number.isFinite(Number(user.id)) || typeof user.username !== 'string') {
+    res.status(401).json({ error: 'Authentication required.' });
     return;
   }
-
-  try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    req.user = {
-      id: Number(payload.sub),
-      username: payload.username
-    };
-    next();
-  } catch {
-    res.status(401).json({ error: 'Invalid or expired auth token.' });
-  }
+  req.user = normalizeSessionUser(user);
+  next();
 }
 
-export function getTokenConfig() {
+export function destroyUserSession(req) {
+  return new Promise((resolve, reject) => {
+    if (!req.session) {
+      resolve();
+      return;
+    }
+    req.session.destroy((err) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+export function getSessionConfig() {
   return {
-    expiresIn: JWT_EXPIRES_IN
+    expiresInMs: SESSION_TTL_MS
   };
 }

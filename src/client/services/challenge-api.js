@@ -4,7 +4,7 @@ import { authHeaders } from './auth-api.js';
 
 function getApiBase() {
   if (import.meta.env.DEV) {
-    return `http://${location.hostname}:3001`;
+    return `${location.protocol}//${location.hostname}:3001`;
   }
   return '';
 }
@@ -40,6 +40,7 @@ export async function contributePhoto(photo) {
   if (!payload.location) throw new Error('GPS requis pour contribuer une photo.');
   const res = await fetch(`${getApiBase()}/api/photos/contribute`, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   });
@@ -53,6 +54,7 @@ export async function contributePhoto(photo) {
 export async function requestChallengePhoto() {
   const res = await fetch(`${getApiBase()}/api/challenge/request`, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
   });
   const data = await res.json();
@@ -69,6 +71,7 @@ export async function respondToChallenge({ photo, challengePhotoId }) {
   if (!payload.location) throw new Error('GPS requis pour répondre au challenge.');
   const res = await fetch(`${getApiBase()}/api/photos/respond`, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ ...payload, challengePhotoId }),
   });
@@ -88,6 +91,7 @@ export async function submitPhotoToChallenge({ challengeId, photoId } = {}) {
   if (!challengeId || !photoId) throw new Error('Missing challengeId or photoId.');
   const res = await fetch(`${getApiBase()}/api/challenge/${challengeId}/submit`, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ photoId }),
   });
@@ -95,3 +99,4 @@ export async function submitPhotoToChallenge({ challengeId, photoId } = {}) {
   if (!res.ok) throw new Error(data?.error || 'Submission failed.');
   return data;
 }
+

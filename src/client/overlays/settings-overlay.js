@@ -1,10 +1,10 @@
-// Settings dropdown panel — opened by the ⚙️ button in time-overlay.
+﻿// Settings dropdown panel — opened by the ⚙️ button in time-overlay.
 // Contains: login/register/logout, gallery, notifs, score & leaderboard, règlement.
 
 import {
   login,
   register,
-  clearSession,
+  logout,
   getStoredUser,
 } from '../services/auth-api.js';
 import { getLeaderboard, getMyScore } from '../services/leaderboard-api.js';
@@ -254,8 +254,9 @@ export function createSettingsOverlay({
     }
   });
 
-  logoutBtn.addEventListener('click', () => {
-    clearSession();
+  logoutBtn.addEventListener('click', async () => {
+    authStatus.textContent = '...';
+    await logout();
     currentUser = null;
     authStatus.textContent = 'Déconnecté.';
     refreshAuthUi();

@@ -1,8 +1,8 @@
-import { authHeaders } from './auth-api.js';
+import { authHeaders, getStoredUser } from './auth-api.js';
 
 function getApiBase() {
   if (import.meta.env.DEV) {
-    return `http://${location.hostname}:3001`;
+    return `${location.protocol}//${location.hostname}:3001`;
   }
   return '';
 }
@@ -14,9 +14,13 @@ export async function getLeaderboard() {
 }
 
 export async function getMyScore() {
+  if (!getStoredUser()) return null;
   const headers = authHeaders();
-  if (!headers.Authorization) return null;
-  const res = await fetch(`${getApiBase()}/api/me/score`, { headers });
+  const res = await fetch(`${getApiBase()}/api/me/score`, {
+    credentials: 'include',
+    headers
+  });
   if (!res.ok) return null;
   return res.json(); // { score, rank }
 }
+

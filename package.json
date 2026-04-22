@@ -7,8 +7,9 @@
     "dev": "vite",
     "dev:https": "set DEV_HTTPS=1&& vite",
     "server": "node src/server/index.js",
+    "server:https": "set DEV_HTTPS=1&& node src/server/index.js",
     "dev:full": "concurrently \"npm run server\" \"npm run dev\"",
-    "dev:full:https": "concurrently \"npm run server\" \"npm run dev:https\"",
+    "dev:full:https": "concurrently \"npm run server:https\" \"npm run dev:https\"",
     "https:setup": "node scripts/setup-dev-https.mjs",
     "build": "vite build",
     "preview": "vite preview"
@@ -22,7 +23,7 @@
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "jsonwebtoken": "^9.0.2",
+    "express-session": "^1.18.2",
     "leaflet": "^1.9.4",
     "sqlite3": "^6.0.1",
     "ws": "^8.17.1"

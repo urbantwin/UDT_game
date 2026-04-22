@@ -1,16 +1,58 @@
-﻿import express from 'express';
+import express from 'express';
 import cors from 'cors';
-import { createServer } from 'http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import session from 'express-session';
+import { createServer as createHttpServer } from 'http';
+import { createServer as createHttpsServer } from 'https';
 import { WebSocketServer } from 'ws';
 import { getDb, run, all, updateScore } from './db.js';
-import { hashPassword, verifyPassword, createToken, requireAuth, getTokenConfig } from './auth.js';
+import {
+  hashPassword,
+  verifyPassword,
+  requireAuth,
+  createUserSession,
+  destroyUserSession,
+  getSessionConfig
+} from './auth.js';
 import { CHALLENGE_WINDOW, GAME_SETTINGS, SUBMISSION_WINDOW, getTodayLocation } from '../../game/game-config.js';
 import { getLocationById } from '../../game/epfl-locations.js';
 
+
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
+const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-only-change-me';
+const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'udt.sid';
+const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS ?? 7 * 24 * 60 * 60 * 1000);
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+const useHttps = process.env.DEV_HTTPS === '1' || process.env.DEV_HTTPS === 'true';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const certPath = path.resolve(__dirname, '../../certs/dev-cert.pem');
+const keyPath = path.resolve(__dirname, '../../certs/dev-key.pem');
 
 const app = express();
-app.use(cors());
+app.set('trust proxy', 1);
+app.use(cors({
+  origin: CORS_ORIGINS.length ? CORS_ORIGINS : true,
+  credentials: true
+}));
+app.use(session({
+  name: SESSION_COOKIE_NAME,
+  secret: SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production' || useHttps,
+    maxAge: SESSION_TTL_MS
+  }
+}));
 app.use(express.json({ limit: '15mb' }));
 
 function requireDevAccess(req, res, next) {
@@ -46,8 +88,8 @@ app.post('/api/auth/register', async (req, res) => {
       [username.trim().toLowerCase(), passwordHash, Date.now()]
     );
     const user = { id: result.lastID, username: username.trim().toLowerCase() };
-    const token = createToken(user);
-    res.status(201).json({ token, user, session: getTokenConfig() });
+    await createUserSession(req, user);
+    res.status(201).json({ user, session: getSessionConfig() });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -72,8 +114,8 @@ app.post('/api/auth/login', async (req, res) => {
       return;
     }
     const publicUser = { id: user.id, username: user.username };
-    const token = createToken(publicUser);
-    res.json({ token, user: publicUser, session: getTokenConfig() });
+    await createUserSession(req, publicUser);
+    res.json({ user: publicUser, session: getSessionConfig() });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -92,7 +134,19 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+app.post('/api/auth/logout', async (req, res) => {
+  try {
+    await destroyUserSession(req);
+    res.clearCookie(SESSION_COOKIE_NAME, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production' || useHttps
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 // ---- ADMIN (dev-only) ----
 app.get('/api/admin/submissions', requireAuth, requireDevAccess, async (_req, res) => {
   try {
@@ -255,9 +309,9 @@ app.post('/api/photos', requireAuth, async (req, res) => {
   }
 });
 
-// ── BUCKET ROUTES ──────────────────────────────────────────────────────────
+// -- BUCKET ROUTES ----------------------------------------------------------
 
-// POST /api/photos/contribute  → Bucket 1 (contribution en attente validation)
+// POST /api/photos/contribute  ? Bucket 1 (contribution en attente validation)
 app.post('/api/photos/contribute', requireAuth, async (req, res) => {
   const { clientId, createdAt, width, height, type, location, dataUrl } = req.body || {};
   if (!dataUrl || !createdAt) {
@@ -284,7 +338,7 @@ app.post('/api/photos/contribute', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/photos/respond  → Bucket 3 (réponse à un challenge, en attente validation)
+// POST /api/photos/respond  ? Bucket 3 (r�ponse � un challenge, en attente validation)
 app.post('/api/photos/respond', requireAuth, async (req, res) => {
   const { clientId, createdAt, width, height, type, location, dataUrl, challengePhotoId } = req.body || {};
   if (!dataUrl || !createdAt) {
@@ -302,7 +356,7 @@ app.post('/api/photos/respond', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
     const challengePhoto = await getPhotoById(db, Number(challengePhotoId));
-    // Accepter 'validated' (pool) et 'served' (envoyée en challenge mais pas encore répondue)
+    // Accepter 'validated' (pool) et 'served' (envoy�e en challenge mais pas encore r�pondue)
     if (!challengePhoto || challengePhoto.category !== 'contribution'
         || !['validated', 'served'].includes(challengePhoto.status)) {
       res.status(400).json({ error: 'Invalid or unavailable challenge photo.' });
@@ -320,7 +374,7 @@ app.post('/api/photos/respond', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/admin/photos?bucket=1|2|3|4  → liste par bucket (admin only)
+// GET /api/admin/photos?bucket=1|2|3|4  ? liste par bucket (admin only)
 app.get('/api/admin/photos', requireAuth, requireDevAccess, async (req, res) => {
   const bucket = Number(req.query.bucket);
   const bucketMap = {
@@ -362,7 +416,7 @@ app.get('/api/admin/photos', requireAuth, requireDevAccess, async (req, res) => 
   }
 });
 
-// POST /api/admin/photos/:id/review  → valider ou rejeter une photo (admin only)
+// POST /api/admin/photos/:id/review  ? valider ou rejeter une photo (admin only)
 app.post('/api/admin/photos/:id/review', requireAuth, requireDevAccess, async (req, res) => {
   const photoId = Number(req.params.id);
   const { action, note } = req.body || {};
@@ -389,7 +443,7 @@ app.post('/api/admin/photos/:id/review', requireAuth, requireDevAccess, async (r
       [newStatus, req.user.id, Date.now(), reviewNote, photoId]
     );
 
-    // Si une RÉPONSE est refusée → remettre la photo originale en 'validated' (bucket 2)
+    // Si une R�PONSE est refus�e ? remettre la photo originale en 'validated' (bucket 2)
     if (existing.category === 'response' && normalizedAction === 'discard' && existing.challengePhotoId) {
       await run(db,
         "UPDATE photos SET status = 'validated' WHERE id = ? AND category = 'contribution'",
@@ -397,16 +451,16 @@ app.post('/api/admin/photos/:id/review', requireAuth, requireDevAccess, async (r
       );
     }
 
-    // ── Points de score ──────────────────────────────────────────────────────
+    // -- Points de score ------------------------------------------------------
     if (existing.category === 'response' && existing.userId) {
       if (normalizedAction === 'validate') {
-        await updateScore(db, existing.userId, 25);  // +25 challenge réussi
+        await updateScore(db, existing.userId, 25);  // +25 challenge r�ussi
       } else {
         await updateScore(db, existing.userId, -2);  // -2 mauvais lieu
       }
     }
 
-    // Envoyer une notification au joueur propriétaire de la photo
+    // Envoyer une notification au joueur propri�taire de la photo
     if (existing.userId) {
       const notifMessage = buildReviewNotification(existing.category, normalizedAction, reviewNote);
       if (notifMessage) {
@@ -428,20 +482,20 @@ function buildReviewNotification(category, action, note) {
   const noteStr = note ? ` (${note})` : '';
   if (category === 'contribution') {
     return action === 'validate'
-      ? `✅ Ta photo a été approuvée et ajoutée au pool de challenges !`
-      : `❌ Ta photo a été refusée.${noteStr}`;
+      ? `? Ta photo a �t� approuv�e et ajout�e au pool de challenges !`
+      : `? Ta photo a �t� refus�e.${noteStr}`;
   }
   if (category === 'response') {
     return action === 'validate'
-      ? `🏆 Félicitations ! Tu as réussi le challenge. Ta photo a été validée !`
-      : `💔 Challenge échoué. Ta photo n'a pas été retenue.${noteStr}`;
+      ? `?? F�licitations ! Tu as r�ussi le challenge. Ta photo a �t� valid�e !`
+      : `?? Challenge �chou�. Ta photo n'a pas �t� retenue.${noteStr}`;
   }
   return null;
 }
 
-// â”€â”€ CHALLENGES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── CHALLENGES ──────────────────────────────────────────────
 
-// GET /api/challenge/today  â†’ dÃ©fi du jour (crÃ©Ã© si inexistant)
+// GET /api/challenge/today  → défi du jour (créé si inexistant)
 // POST /api/challenge/request -> give one challenge photo to the current player.
 // Rules:
 // - only between 12:00 and 23:59
@@ -464,7 +518,7 @@ app.post('/api/challenge/request', requireAuth, async (req, res) => {
       return;
     }
 
-    // Marquer la photo comme "en cours de challenge" → sort du bucket 2
+    // Marquer la photo comme "en cours de challenge" ? sort du bucket 2
     await run(db, "UPDATE photos SET status = 'served' WHERE id = ?", [candidate.id]);
 
     // Record as seen for this player
@@ -486,7 +540,7 @@ app.get('/api/challenge/today', async (req, res) => {
     const today = formatLocalDate(new Date());
     let challenge = (await all(db, 'SELECT * FROM challenges WHERE date = ?', [today]))[0];
     if (!challenge) {
-      // Le locationId par dÃ©faut ; le client peut surcharger via game-config.js
+      // Le locationId par défaut ; le client peut surcharger via game-config.js
       const defaultLocationId = req.query.locationId ?? 'rolex';
       const result = await run(db,
         'INSERT INTO challenges (date, locationId, createdAt) VALUES (?, ?, ?)',
@@ -500,7 +554,7 @@ app.get('/api/challenge/today', async (req, res) => {
   }
 });
 
-// POST /api/challenge/:id/submit  â†’ soumettre une photo pour un dÃ©fi
+// POST /api/challenge/:id/submit  → soumettre une photo pour un défi
 app.post('/api/challenge/:id/submit', requireAuth, async (req, res) => {
   const challengeId = Number(req.params.id);
   const { photoId } = req.body || {};
@@ -575,9 +629,9 @@ app.post('/api/challenge/:id/submit', requireAuth, async (req, res) => {
   }
 });
 
-// â”€â”€ MINI-JEUX (GUESSES) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── MINI-JEUX (GUESSES) ──────────────────────────────────────
 
-// POST /api/guess  â†’ soumettre une rÃ©ponse Ã  un mini-jeu
+// POST /api/guess  → soumettre une réponse à un mini-jeu
 app.post('/api/guess', requireAuth, async (req, res) => {
   const { photoId, type, payload } = req.body || {};
   if (!photoId || !type || !payload) {
@@ -599,7 +653,7 @@ app.post('/api/guess', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/guess/:photoId  â†’ scores existants pour une photo
+// GET /api/guess/:photoId  → scores existants pour une photo
 app.get('/api/guess/:photoId', async (req, res) => {
   try {
     const db = await getDb();
@@ -613,7 +667,7 @@ app.get('/api/guess/:photoId', async (req, res) => {
   }
 });
 
-// â”€â”€ HELPERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── HELPERS ─────────────────────────────────────────────────
 
 async function getPhotoMeta(db, photoId) {
   return (await all(db, 'SELECT createdAt, location FROM photos WHERE id = ?', [photoId]))[0] ?? null;
@@ -628,7 +682,7 @@ async function getChallengeById(db, challengeId) {
 }
 
 async function pickChallengePhotoForUser(db, userId) {
-  // Bucket 2: contributions validées, pas prises par ce joueur, pas déjà vues
+  // Bucket 2: contributions valid�es, pas prises par ce joueur, pas d�j� vues
   const rows = await all(
     db,
     `SELECT p.id, p.dataUrl
@@ -707,7 +761,7 @@ function computeScore(type, payload, photo) {
     const guessMinutes = payload.hour * 60 + payload.minute;
     const realMinutes  = real.getHours() * 60 + real.getMinutes();
     const diff = Math.abs(guessMinutes - realMinutes);
-    // 0â€“5 min â†’ 500 pts, 120+ min â†’ 0 pts
+    // 0–5 min → 500 pts, 120+ min → 0 pts
     return Math.max(0, Math.round(500 * (1 - diff / 120)));
   }
   if (type === 'geo-pin') {
@@ -715,10 +769,10 @@ function computeScore(type, payload, photo) {
     const loc = photo.location ? JSON.parse(photo.location) : null;
     if (!loc) return 0;
     const dist = haversineMeters(loc.lat, loc.lon ?? loc.lng, payload.lat, payload.lng);
-    // 0â€“10 m â†’ 1000 pts, 500+ m â†’ 0 pts
+    // 0–10 m → 1000 pts, 500+ m → 0 pts
     return Math.max(0, Math.round(1000 * (1 - dist / 500)));
   }
-  // re-photo : validÃ© par prÃ©sence (score fixe = 300)
+  // re-photo : validé par présence (score fixe = 300)
   return 300;
 }
 
@@ -731,11 +785,11 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// â”€â”€ WEBSOCKET & SERVER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── WEBSOCKET & SERVER ───────────────────────────────────────
 
-// ── SCORE & CLASSEMENT ───────────────────────────────────────────────────────
+// -- SCORE & CLASSEMENT -------------------------------------------------------
 
-// POST /api/admin/photos/:id/award-unbeaten → +100 au soumetteur original (personne n'a trouvé)
+// POST /api/admin/photos/:id/award-unbeaten ? +100 au soumetteur original (personne n'a trouv�)
 app.post('/api/admin/photos/:id/award-unbeaten', requireAuth, requireDevAccess, async (req, res) => {
   const photoId = Number(req.params.id);
   if (!Number.isInteger(photoId) || photoId <= 0) {
@@ -763,7 +817,7 @@ app.post('/api/admin/photos/:id/award-unbeaten', requireAuth, requireDevAccess, 
       await run(db,
         'INSERT INTO notifications (userId, type, message, photoId, createdAt) VALUES (?, ?, ?, ?, ?)',
         [photo.userId, 'unbeaten',
-         '🏆 Incroyable ! Personne n\'a trouvé le lieu de ta photo. Tu gagnes 100 points !',
+         '?? Incroyable ! Personne n\'a trouv� le lieu de ta photo. Tu gagnes 100 points !',
          photoId, Date.now()]
       );
     }
@@ -773,7 +827,7 @@ app.post('/api/admin/photos/:id/award-unbeaten', requireAuth, requireDevAccess, 
   }
 });
 
-// GET /api/leaderboard → classement de tous les joueurs
+// GET /api/leaderboard ? classement de tous les joueurs
 app.get('/api/leaderboard', async (_req, res) => {
   try {
     const db = await getDb();
@@ -790,7 +844,7 @@ app.get('/api/leaderboard', async (_req, res) => {
   }
 });
 
-// GET /api/me/score → score et rang du joueur connecté
+// GET /api/me/score ? score et rang du joueur connect�
 app.get('/api/me/score', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
@@ -810,9 +864,9 @@ app.get('/api/me/score', requireAuth, async (req, res) => {
   }
 });
 
-// ── NOTIFICATIONS ─────────────────────────────────────────────────────────
+// -- NOTIFICATIONS ---------------------------------------------------------
 
-// GET /api/notifications  → notifs du joueur connecté
+// GET /api/notifications  ? notifs du joueur connect�
 app.get('/api/notifications', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
@@ -827,7 +881,7 @@ app.get('/api/notifications', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/notifications/read-all  → marquer tout comme lu
+// POST /api/notifications/read-all  ? marquer tout comme lu
 app.post('/api/notifications/read-all', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
@@ -838,7 +892,7 @@ app.post('/api/notifications/read-all', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/notifications/:id/read  → marquer une notif comme lue
+// POST /api/notifications/:id/read  ? marquer une notif comme lue
 app.post('/api/notifications/:id/read', requireAuth, async (req, res) => {
   const notifId = Number(req.params.id);
   try {
@@ -853,7 +907,20 @@ app.post('/api/notifications/:id/read', requireAuth, async (req, res) => {
   }
 });
 
-const server = createServer(app);
+function getHttpsConfig() {
+  if (!useHttps) return null;
+  if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
+    throw new Error('HTTPS certificates not found. Run `npm run https:setup` first.');
+  }
+  return {
+    cert: fs.readFileSync(certPath),
+    key: fs.readFileSync(keyPath),
+  };
+}
+
+const server = useHttps
+  ? createHttpsServer(getHttpsConfig(), app)
+  : createHttpServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 function broadcast(message) {
@@ -866,6 +933,7 @@ function broadcast(message) {
 }
 
 server.listen(PORT, () => {
-  console.log(`Photo sync server listening on http://localhost:${PORT}`);
+  const protocol = useHttps ? 'https' : 'http';
+  console.log(`Photo sync server listening on ${protocol}://localhost:${PORT}`);
 });
 
