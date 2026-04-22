@@ -31,8 +31,21 @@ export function createCameraController({ container, onPhotoSaved } = {}) {
   let stream = null;
   let opening = false;
 
+  function hasKnownLocation() {
+    const loc = state.userLocation;
+    return Boolean(
+      loc
+      && Number.isFinite(loc.lat)
+      && Number.isFinite(loc.lon)
+    );
+  }
+
   overlay.onOpen(async () => {
     if (opening || stream) return;
+    if (!hasKnownLocation()) {
+      overlay.setStatus('Activez la geolocalisation et attendez un fix GPS.');
+      return;
+    }
     opening = true;
     overlay.setStatus('Requesting camera...');
     try {
@@ -54,6 +67,10 @@ export function createCameraController({ container, onPhotoSaved } = {}) {
 
   overlay.onCapture(async () => {
     if (!stream) return;
+    if (!hasKnownLocation()) {
+      overlay.setStatus('Position GPS inconnue. Impossible de prendre une photo.');
+      return;
+    }
     try {
       const photo = await capturePhoto(overlay.video);
       showPreview(photo);
@@ -164,6 +181,11 @@ export function createCameraController({ container, onPhotoSaved } = {}) {
   }
 
   function open() {
+    if (!hasKnownLocation()) {
+      overlay.setStatus('Activez la geolocalisation et attendez un fix GPS.');
+      overlay.openPanel();
+      return;
+    }
     overlay.openPanel();
   }
 

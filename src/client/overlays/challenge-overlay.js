@@ -76,7 +76,7 @@ export function createChallengeOverlay({ container = document.body, onRequest, o
 
   const instruction = document.createElement('div');
   instruction.style.cssText = 'font:13px system-ui,sans-serif; text-align:center; opacity:0.9; padding:0 4px;';
-  instruction.textContent = 'Va prendre une photo de ce lieu avec ton GPS actif !';
+  instruction.textContent = "Accepte maintenant pour tenter ce défi. Si tu refuses, il est perdu et compté comme échoué (pas de deuxième chance).";
   modal.appendChild(instruction);
 
   const btnRow = document.createElement('div');
@@ -92,7 +92,7 @@ export function createChallengeOverlay({ container = document.body, onRequest, o
 
   const closeModalBtn = document.createElement('button');
   closeModalBtn.type = 'button';
-  closeModalBtn.textContent = 'Fermer';
+  closeModalBtn.textContent = 'Refuser (échec)';
   closeModalBtn.style.cssText = `
     background:#9ca3af; color:#111827; border:none; border-radius:6px;
     padding:8px 10px; cursor:pointer; font:12px system-ui,sans-serif;
@@ -145,18 +145,30 @@ export function createChallengeOverlay({ container = document.body, onRequest, o
     }
   });
 
-  goBtn.addEventListener('click', () => {
+  goBtn.addEventListener('click', async () => {
     if (!currentChallengePhotoId) return;
-    modal.style.display = 'none';
-    challengeImg.src = '';
-    onGoRespond?.(currentChallengePhotoId);
-    currentChallengePhotoId = null;
+    goBtn.disabled = true;
+    closeModalBtn.disabled = true;
+    stateLabel.textContent = 'Acceptation du challenge...';
+    try {
+      await onGoRespond?.(currentChallengePhotoId);
+      modal.style.display = 'none';
+      challengeImg.src = '';
+      currentChallengePhotoId = null;
+      stateLabel.textContent = 'Challenge accepte. Bonne chance !';
+    } catch (err) {
+      stateLabel.textContent = err?.message || 'Impossible d\'accepter le challenge.';
+    } finally {
+      goBtn.disabled = false;
+      closeModalBtn.disabled = false;
+    }
   });
 
   closeModalBtn.addEventListener('click', () => {
     modal.style.display = 'none';
     challengeImg.src = '';
     currentChallengePhotoId = null;
+    stateLabel.textContent = 'Challenge refusé : perdu (échec).';
   });
 
   closePanelBtn.addEventListener('click', closePanel);

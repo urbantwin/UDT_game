@@ -14,7 +14,7 @@ import { createAdminGalleryView } from '../gallery/admin-gallery-view.js';
 import { startGeolocation } from '../services/geolocation.js';
 import { getAllPhotos } from '../services/photo-store.js';
 import { createPhotoSync } from '../services/photo-sync.js';
-import { requestChallengePhoto, contributePhoto, respondToChallenge } from '../services/challenge-api.js';
+import { requestChallengePhoto, acceptChallenge, contributePhoto, respondToChallenge } from '../services/challenge-api.js';
 import { restoreSession } from '../services/auth-api.js';
 import { createNotificationScheduler } from '../services/notification-scheduler.js';
 import { createNotificationsOverlay } from '../overlays/notifications-overlay.js';
@@ -85,7 +85,8 @@ export function bootstrapApp() {
       if (!state.player.id) throw new Error('Connexion requise.');
       return await requestChallengePhoto();
     },
-    onGoRespond: (challengePhotoId) => {
+    onGoRespond: async (challengePhotoId) => {
+      await acceptChallenge({ challengePhotoId });
       pendingChallengePhotoId = challengePhotoId;
       cameraController.open();
     },

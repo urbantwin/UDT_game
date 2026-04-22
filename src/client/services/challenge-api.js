@@ -61,6 +61,18 @@ export async function requestChallengePhoto() {
   if (!res.ok) throw new Error(data?.error || 'Impossible de récupérer un challenge.');
   return data; // { photoId, dataUrl }
 }
+export async function acceptChallenge({ challengePhotoId } = {}) {
+  if (!challengePhotoId) throw new Error('challengePhotoId manquant.');
+  const res = await fetch(`${getApiBase()}/api/challenge/accept`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ challengePhotoId }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || "Impossible d'accepter le challenge.");
+  return data;
+}
 
 // ── CHALLENGE RESPONSE (Bucket 3) ─────────────────────────────────────────
 // Soumet la photo prise en réponse à un challenge.
@@ -99,4 +111,7 @@ export async function submitPhotoToChallenge({ challengeId, photoId } = {}) {
   if (!res.ok) throw new Error(data?.error || 'Submission failed.');
   return data;
 }
+
+
+
 

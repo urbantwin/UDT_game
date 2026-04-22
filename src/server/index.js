@@ -330,15 +330,13 @@ app.post('/api/photos/contribute', requireAuth, async (req, res) => {
       [req.user.id, clientId ?? null, createdAt, width ?? null, height ?? null,
        type ?? 'image/png', JSON.stringify(location), dataUrl]
     );
-    // +5 pts pour chaque photo contribution soumise
-    await updateScore(db, req.user.id, 5);
     res.json({ id: result.lastID });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST /api/photos/respond  ? Bucket 3 (r�ponse � un challenge, en attente validation)
+// POST /api/photos/respond  ? Bucket 3 (r?ponse ? un challenge, en attente validation)
 app.post('/api/photos/respond', requireAuth, async (req, res) => {
   const { clientId, createdAt, width, height, type, location, dataUrl, challengePhotoId } = req.body || {};
   if (!dataUrl || !createdAt) {
@@ -356,9 +354,9 @@ app.post('/api/photos/respond', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
     const challengePhoto = await getPhotoById(db, Number(challengePhotoId));
-    // Accepter 'validated' (pool) et 'served' (envoy�e en challenge mais pas encore r�pondue)
+    // Only accepted challenges can be answered (status = 'served').
     if (!challengePhoto || challengePhoto.category !== 'contribution'
-        || !['validated', 'served'].includes(challengePhoto.status)) {
+        || challengePhoto.status !== 'served') {
       res.status(400).json({ error: 'Invalid or unavailable challenge photo.' });
       return;
     }
@@ -368,6 +366,33 @@ app.post('/api/photos/respond', requireAuth, async (req, res) => {
       [req.user.id, clientId ?? null, createdAt, width ?? null, height ?? null,
        type ?? 'image/png', JSON.stringify(location), dataUrl, Number(challengePhotoId)]
     );
+    const challengeOwnerId = Number(challengePhoto.userId);
+    const challengeLocation = safeJsonParse(challengePhoto.location);
+    const responseLat = Number(location?.lat);
+    const responseLon = Number(location?.lon ?? location?.lng);
+    const challengeLat = Number(challengeLocation?.lat);
+    const challengeLon = Number(challengeLocation?.lon ?? challengeLocation?.lng);
+
+    if (
+      Number.isInteger(challengeOwnerId)
+      && challengeOwnerId > 0
+      && challengeOwnerId !== req.user.id
+      && Number.isFinite(responseLat)
+      && Number.isFinite(responseLon)
+      && Number.isFinite(challengeLat)
+      && Number.isFinite(challengeLon)
+    ) {
+      const distanceMeters = haversineMeters(challengeLat, challengeLon, responseLat, responseLon);
+      if (distanceMeters < 25) {
+        await updateScore(db, req.user.id, 10);
+      } else if (distanceMeters < 50) {
+        await updateScore(db, req.user.id, 5);
+      } else if (distanceMeters <= 100) {
+        await updateScore(db, req.user.id, 1);
+      } else {
+        await updateScore(db, challengeOwnerId, 5);
+      }
+    }
     res.json({ id: result.lastID });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -443,7 +468,7 @@ app.post('/api/admin/photos/:id/review', requireAuth, requireDevAccess, async (r
       [newStatus, req.user.id, Date.now(), reviewNote, photoId]
     );
 
-    // Si une R�PONSE est refus�e ? remettre la photo originale en 'validated' (bucket 2)
+    // Si une R?PONSE est refus?e ? remettre la photo originale en 'validated' (bucket 2)
     if (existing.category === 'response' && normalizedAction === 'discard' && existing.challengePhotoId) {
       await run(db,
         "UPDATE photos SET status = 'validated' WHERE id = ? AND category = 'contribution'",
@@ -451,16 +476,18 @@ app.post('/api/admin/photos/:id/review', requireAuth, requireDevAccess, async (r
       );
     }
 
-    // -- Points de score ------------------------------------------------------
-    if (existing.category === 'response' && existing.userId) {
-      if (normalizedAction === 'validate') {
-        await updateScore(db, existing.userId, 25);  // +25 challenge r�ussi
-      } else {
-        await updateScore(db, existing.userId, -2);  // -2 mauvais lieu
+    // Scoring rules
+    const isTransitionToValidated = normalizedAction === 'validate' && existing.status !== 'validated';
+    if (isTransitionToValidated && existing.userId) {
+      if (existing.category === 'contribution') {
+        await updateScore(db, existing.userId, 5);
+      }
+      if (existing.category === 'response') {
+        await updateScore(db, existing.userId, 25);
       }
     }
 
-    // Envoyer une notification au joueur propri�taire de la photo
+    // Envoyer une notification au joueur proprietaire de la photo.
     if (existing.userId) {
       const notifMessage = buildReviewNotification(existing.category, normalizedAction, reviewNote);
       if (notifMessage) {
@@ -482,20 +509,20 @@ function buildReviewNotification(category, action, note) {
   const noteStr = note ? ` (${note})` : '';
   if (category === 'contribution') {
     return action === 'validate'
-      ? `? Ta photo a �t� approuv�e et ajout�e au pool de challenges !`
-      : `? Ta photo a �t� refus�e.${noteStr}`;
+      ? `? Ta photo a ?t? approuv?e et ajout?e au pool de challenges !`
+      : `? Ta photo a ?t? refus?e.${noteStr}`;
   }
   if (category === 'response') {
     return action === 'validate'
-      ? `?? F�licitations ! Tu as r�ussi le challenge. Ta photo a �t� valid�e !`
-      : `?? Challenge �chou�. Ta photo n'a pas �t� retenue.${noteStr}`;
+      ? `?? F?licitations ! Tu as r?ussi le challenge. Ta photo a ?t? valid?e !`
+      : `?? Challenge ?chou?. Ta photo n'a pas ?t? retenue.${noteStr}`;
   }
   return null;
 }
 
-// ── CHALLENGES ──────────────────────────────────────────────
+// -- CHALLENGES ----------------------------------------------
 
-// GET /api/challenge/today  → défi du jour (créé si inexistant)
+// GET /api/challenge/today  ? d�fi du jour (cr�� si inexistant)
 // POST /api/challenge/request -> give one challenge photo to the current player.
 // Rules:
 // - only between 12:00 and 23:59
@@ -518,9 +545,6 @@ app.post('/api/challenge/request', requireAuth, async (req, res) => {
       return;
     }
 
-    // Marquer la photo comme "en cours de challenge" ? sort du bucket 2
-    await run(db, "UPDATE photos SET status = 'served' WHERE id = ?", [candidate.id]);
-
     // Record as seen for this player
     await run(
       db,
@@ -534,13 +558,55 @@ app.post('/api/challenge/request', requireAuth, async (req, res) => {
   }
 });
 
+
+app.post('/api/challenge/accept', requireAuth, async (req, res) => {
+  const challengePhotoId = Number(req.body?.challengePhotoId);
+  if (!Number.isInteger(challengePhotoId) || challengePhotoId <= 0) {
+    res.status(400).json({ error: 'Invalid challengePhotoId.' });
+    return;
+  }
+
+  try {
+    const db = await getDb();
+    const challengePhoto = await getPhotoById(db, challengePhotoId);
+    if (!challengePhoto || challengePhoto.category !== 'contribution') {
+      res.status(404).json({ error: 'Challenge photo not found.' });
+      return;
+    }
+
+    const seen = await all(
+      db,
+      'SELECT 1 FROM challenge_views WHERE userId = ? AND photoId = ? LIMIT 1',
+      [req.user.id, challengePhotoId]
+    );
+    if (!seen.length) {
+      res.status(400).json({ error: 'Challenge was not assigned to this user.' });
+      return;
+    }
+
+    if (challengePhoto.status !== 'validated' && challengePhoto.status !== 'served') {
+      res.status(400).json({ error: 'Challenge is no longer available.' });
+      return;
+    }
+
+    await run(
+      db,
+      "UPDATE photos SET status = 'served' WHERE id = ? AND category = 'contribution' AND status = 'validated'",
+      [challengePhotoId]
+    );
+
+    res.json({ ok: true, photoId: challengePhotoId, status: 'served' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 app.get('/api/challenge/today', async (req, res) => {
   try {
     const db = await getDb();
     const today = formatLocalDate(new Date());
     let challenge = (await all(db, 'SELECT * FROM challenges WHERE date = ?', [today]))[0];
     if (!challenge) {
-      // Le locationId par défaut ; le client peut surcharger via game-config.js
+      // Le locationId par d�faut ; le client peut surcharger via game-config.js
       const defaultLocationId = req.query.locationId ?? 'rolex';
       const result = await run(db,
         'INSERT INTO challenges (date, locationId, createdAt) VALUES (?, ?, ?)',
@@ -554,7 +620,7 @@ app.get('/api/challenge/today', async (req, res) => {
   }
 });
 
-// POST /api/challenge/:id/submit  → soumettre une photo pour un défi
+// POST /api/challenge/:id/submit  ? soumettre une photo pour un d�fi
 app.post('/api/challenge/:id/submit', requireAuth, async (req, res) => {
   const challengeId = Number(req.params.id);
   const { photoId } = req.body || {};
@@ -629,9 +695,9 @@ app.post('/api/challenge/:id/submit', requireAuth, async (req, res) => {
   }
 });
 
-// ── MINI-JEUX (GUESSES) ──────────────────────────────────────
+// -- MINI-JEUX (GUESSES) --------------------------------------
 
-// POST /api/guess  → soumettre une réponse à un mini-jeu
+// POST /api/guess  ? soumettre une r�ponse � un mini-jeu
 app.post('/api/guess', requireAuth, async (req, res) => {
   const { photoId, type, payload } = req.body || {};
   if (!photoId || !type || !payload) {
@@ -653,7 +719,7 @@ app.post('/api/guess', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/guess/:photoId  → scores existants pour une photo
+// GET /api/guess/:photoId  ? scores existants pour une photo
 app.get('/api/guess/:photoId', async (req, res) => {
   try {
     const db = await getDb();
@@ -667,7 +733,7 @@ app.get('/api/guess/:photoId', async (req, res) => {
   }
 });
 
-// ── HELPERS ─────────────────────────────────────────────────
+// -- HELPERS -------------------------------------------------
 
 async function getPhotoMeta(db, photoId) {
   return (await all(db, 'SELECT createdAt, location FROM photos WHERE id = ?', [photoId]))[0] ?? null;
@@ -682,7 +748,7 @@ async function getChallengeById(db, challengeId) {
 }
 
 async function pickChallengePhotoForUser(db, userId) {
-  // Bucket 2: contributions valid�es, pas prises par ce joueur, pas d�j� vues
+  // Bucket 2: contributions valid?es, pas prises par ce joueur, pas d?j? vues
   const rows = await all(
     db,
     `SELECT p.id, p.dataUrl
@@ -761,7 +827,7 @@ function computeScore(type, payload, photo) {
     const guessMinutes = payload.hour * 60 + payload.minute;
     const realMinutes  = real.getHours() * 60 + real.getMinutes();
     const diff = Math.abs(guessMinutes - realMinutes);
-    // 0–5 min → 500 pts, 120+ min → 0 pts
+    // 0�5 min ? 500 pts, 120+ min ? 0 pts
     return Math.max(0, Math.round(500 * (1 - diff / 120)));
   }
   if (type === 'geo-pin') {
@@ -769,10 +835,10 @@ function computeScore(type, payload, photo) {
     const loc = photo.location ? JSON.parse(photo.location) : null;
     if (!loc) return 0;
     const dist = haversineMeters(loc.lat, loc.lon ?? loc.lng, payload.lat, payload.lng);
-    // 0–10 m → 1000 pts, 500+ m → 0 pts
+    // 0�10 m ? 1000 pts, 500+ m ? 0 pts
     return Math.max(0, Math.round(1000 * (1 - dist / 500)));
   }
-  // re-photo : validé par présence (score fixe = 300)
+  // re-photo : valid� par pr�sence (score fixe = 300)
   return 300;
 }
 
@@ -785,11 +851,11 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// ── WEBSOCKET & SERVER ───────────────────────────────────────
+// -- WEBSOCKET & SERVER ---------------------------------------
 
 // -- SCORE & CLASSEMENT -------------------------------------------------------
 
-// POST /api/admin/photos/:id/award-unbeaten ? +100 au soumetteur original (personne n'a trouv�)
+// POST /api/admin/photos/:id/award-unbeaten ? +100 au soumetteur original (personne n'a trouv?)
 app.post('/api/admin/photos/:id/award-unbeaten', requireAuth, requireDevAccess, async (req, res) => {
   const photoId = Number(req.params.id);
   if (!Number.isInteger(photoId) || photoId <= 0) {
@@ -817,7 +883,7 @@ app.post('/api/admin/photos/:id/award-unbeaten', requireAuth, requireDevAccess, 
       await run(db,
         'INSERT INTO notifications (userId, type, message, photoId, createdAt) VALUES (?, ?, ?, ?, ?)',
         [photo.userId, 'unbeaten',
-         '?? Incroyable ! Personne n\'a trouv� le lieu de ta photo. Tu gagnes 100 points !',
+         '?? Incroyable ! Personne n\'a trouv? le lieu de ta photo. Tu gagnes 100 points !',
          photoId, Date.now()]
       );
     }
@@ -844,7 +910,7 @@ app.get('/api/leaderboard', async (_req, res) => {
   }
 });
 
-// GET /api/me/score ? score et rang du joueur connect�
+// GET /api/me/score ? score et rang du joueur connect?
 app.get('/api/me/score', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
@@ -866,7 +932,7 @@ app.get('/api/me/score', requireAuth, async (req, res) => {
 
 // -- NOTIFICATIONS ---------------------------------------------------------
 
-// GET /api/notifications  ? notifs du joueur connect�
+// GET /api/notifications  ? notifs du joueur connect?
 app.get('/api/notifications', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
@@ -936,4 +1002,11 @@ server.listen(PORT, () => {
   const protocol = useHttps ? 'https' : 'http';
   console.log(`Photo sync server listening on ${protocol}://localhost:${PORT}`);
 });
+
+
+
+
+
+
+
 
