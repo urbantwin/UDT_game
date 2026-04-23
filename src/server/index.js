@@ -509,20 +509,20 @@ function buildReviewNotification(category, action, note) {
   const noteStr = note ? ` (${note})` : '';
   if (category === 'contribution') {
     return action === 'validate'
-      ? `? Ta photo a ?t? approuv?e et ajout?e au pool de challenges !`
-      : `? Ta photo a ?t? refus?e.${noteStr}`;
+      ? `? Ta photo a ete approuvee et ajoutee au pool de challenges !`
+      : `? Ta photo a ete refusee.${noteStr}`;
   }
   if (category === 'response') {
     return action === 'validate'
-      ? `?? F?licitations ! Tu as r?ussi le challenge. Ta photo a ?t? valid?e !`
-      : `?? Challenge ?chou?. Ta photo n'a pas ?t? retenue.${noteStr}`;
+      ? `?? Felicitations ! Tu as reussi le challenge. Ta photo a ete validee !`
+      : `?? Challenge echoue. Ta photo n'a pas ete retenue.${noteStr}`;
   }
   return null;
 }
 
 // -- CHALLENGES ----------------------------------------------
 
-// GET /api/challenge/today  ? défi du jour (créé si inexistant)
+// GET /api/challenge/today  ? dï¿½fi du jour (crï¿½ï¿½ si inexistant)
 // POST /api/challenge/request -> give one challenge photo to the current player.
 // Rules:
 // - only between 12:00 and 23:59
@@ -606,7 +606,7 @@ app.get('/api/challenge/today', async (req, res) => {
     const today = formatLocalDate(new Date());
     let challenge = (await all(db, 'SELECT * FROM challenges WHERE date = ?', [today]))[0];
     if (!challenge) {
-      // Le locationId par défaut ; le client peut surcharger via game-config.js
+      // Le locationId par dï¿½faut ; le client peut surcharger via game-config.js
       const defaultLocationId = req.query.locationId ?? 'rolex';
       const result = await run(db,
         'INSERT INTO challenges (date, locationId, createdAt) VALUES (?, ?, ?)',
@@ -620,7 +620,7 @@ app.get('/api/challenge/today', async (req, res) => {
   }
 });
 
-// POST /api/challenge/:id/submit  ? soumettre une photo pour un défi
+// POST /api/challenge/:id/submit  ? soumettre une photo pour un dï¿½fi
 app.post('/api/challenge/:id/submit', requireAuth, async (req, res) => {
   const challengeId = Number(req.params.id);
   const { photoId } = req.body || {};
@@ -697,7 +697,7 @@ app.post('/api/challenge/:id/submit', requireAuth, async (req, res) => {
 
 // -- MINI-JEUX (GUESSES) --------------------------------------
 
-// POST /api/guess  ? soumettre une réponse à un mini-jeu
+// POST /api/guess  ? soumettre une rï¿½ponse ï¿½ un mini-jeu
 app.post('/api/guess', requireAuth, async (req, res) => {
   const { photoId, type, payload } = req.body || {};
   if (!photoId || !type || !payload) {
@@ -827,7 +827,7 @@ function computeScore(type, payload, photo) {
     const guessMinutes = payload.hour * 60 + payload.minute;
     const realMinutes  = real.getHours() * 60 + real.getMinutes();
     const diff = Math.abs(guessMinutes - realMinutes);
-    // 0–5 min ? 500 pts, 120+ min ? 0 pts
+    // 0ï¿½5 min ? 500 pts, 120+ min ? 0 pts
     return Math.max(0, Math.round(500 * (1 - diff / 120)));
   }
   if (type === 'geo-pin') {
@@ -835,10 +835,10 @@ function computeScore(type, payload, photo) {
     const loc = photo.location ? JSON.parse(photo.location) : null;
     if (!loc) return 0;
     const dist = haversineMeters(loc.lat, loc.lon ?? loc.lng, payload.lat, payload.lng);
-    // 0–10 m ? 1000 pts, 500+ m ? 0 pts
+    // 0ï¿½10 m ? 1000 pts, 500+ m ? 0 pts
     return Math.max(0, Math.round(1000 * (1 - dist / 500)));
   }
-  // re-photo : validé par présence (score fixe = 300)
+  // re-photo : validï¿½ par prï¿½sence (score fixe = 300)
   return 300;
 }
 
@@ -883,7 +883,7 @@ app.post('/api/admin/photos/:id/award-unbeaten', requireAuth, requireDevAccess, 
       await run(db,
         'INSERT INTO notifications (userId, type, message, photoId, createdAt) VALUES (?, ?, ?, ?, ?)',
         [photo.userId, 'unbeaten',
-         '?? Incroyable ! Personne n\'a trouv? le lieu de ta photo. Tu gagnes 100 points !',
+         '?? Incroyable ! Personne n\'a trouve le lieu de ta photo. Tu gagnes 100 points !',
          photoId, Date.now()]
       );
     }
