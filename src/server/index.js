@@ -509,13 +509,13 @@ function buildReviewNotification(category, action, note) {
   const noteStr = note ? ` (${note})` : '';
   if (category === 'contribution') {
     return action === 'validate'
-      ? `? Ta photo a ete approuvee et ajoutee au pool de challenges !`
-      : `? Ta photo a ete refusee.${noteStr}`;
+      ? `Ta photo a ete approuvee ! +5 pts`
+      : `Ta photo a ete refusee par l'admin.${noteStr}`;
   }
   if (category === 'response') {
     return action === 'validate'
-      ? `?? Felicitations ! Tu as reussi le challenge. Ta photo a ete validee !`
-      : `?? Challenge echoue. Ta photo n'a pas ete retenue.${noteStr}`;
+      ? `Felicitations ! Tu as reussi le challenge. Ta photo a ete validee ! + 25 pts`
+      : `Challenge echoue. Ta photo n'a pas ete retenue.${noteStr}`;
   }
   return null;
 }
