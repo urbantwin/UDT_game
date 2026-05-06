@@ -3,4 +3,9 @@ dist/
 .env
 .env.local
 data/
-certs/*.pem
+certs/
+*.pem
+*.crt
+*.key
+.claude/
+.PLANS/

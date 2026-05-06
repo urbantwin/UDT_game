@@ -2,51 +2,18 @@ import { getNotifications, markAllRead } from '../services/notifications-api.js'
 
 const POLL_INTERVAL_MS = 20_000;
 
-export function createNotificationsOverlay({ container = document.body } = {}) {
-  // ── Conteneur (coin haut-droit) ──────────────────────────────────────────
-  const root = document.createElement('div');
-  root.style.cssText = `
-    position:fixed; top:80px; left:16px; z-index:1400;
-    display:none; flex-direction:column; align-items:flex-end; gap:6px;
-  `;
-
-  // ── Bouton cloche ────────────────────────────────────────────────────────
-  const bellWrap = document.createElement('div');
-  bellWrap.style.cssText = 'position:relative; display:inline-block;';
-
-  const bellBtn = document.createElement('button');
-  bellBtn.type = 'button';
-  bellBtn.innerHTML = '🔔';
-  bellBtn.title = 'Notifications';
-  bellBtn.style.cssText = `
-    background:rgba(255, 255, 255, 0.82); color:#fff; border:none; border-radius:50%;
-    width:38px; height:38px; font-size:16px; cursor:pointer;
-    display:flex; align-items:center; justify-content:center;
-    box-shadow:0 2px 8px rgba(0,0,0,0.3);
-  `;
-
-  const badge = document.createElement('div');
-  badge.style.cssText = `
-    position:absolute; top:-4px; right:-4px;
-    background:#ef4444; color:#fff; border-radius:50%;
-    min-width:18px; height:18px; font:bold 10px system-ui,sans-serif;
-    display:none; align-items:center; justify-content:center; padding:0 3px;
-  `;
-
-  bellWrap.appendChild(bellBtn);
-  bellWrap.appendChild(badge);
-  root.appendChild(bellWrap);
-
-  // ── Panneau liste ────────────────────────────────────────────────────────
+export function createNotificationsOverlay({ container = document.body, onBadgeChange } = {}) {
+  // ── Panneau liste (positionné près des réglages) ─────────────────────────
   const panel = document.createElement('div');
   panel.style.cssText = `
+    position:fixed; top:70px; right:16px; z-index:1400;
     display:none; background:rgba(10,10,10,0.94); color:#fff;
     border-radius:10px; width:230px;
     max-height:calc(100vh - 80px);
     box-shadow:0 6px 20px rgba(0,0,0,0.5);
     flex-direction:column; overflow:hidden;
-    align-self:flex-start;
   `;
+  container.appendChild(panel);
 
   // Header fixe
   const panelHeader = document.createElement('div');
@@ -81,19 +48,15 @@ export function createNotificationsOverlay({ container = document.body } = {}) {
   `;
   panel.appendChild(list);
 
-  root.appendChild(panel);
-  container.appendChild(root);
-
   // ── State ─────────────────────────────────────────────────────────────────
   let open = false;
+  let loggedIn = false;
   let pollTimer = null;
   let unreadNotifs = [];
 
   // ── Helpers ──────────────────────────────────────────────────────────────
   function updateBadge() {
-    const count = unreadNotifs.length;
-    badge.textContent = count > 9 ? '9+' : String(count);
-    badge.style.display = count > 0 ? 'flex' : 'none';
+    onBadgeChange?.(unreadNotifs.length);
   }
 
   function renderList() {
@@ -132,7 +95,6 @@ export function createNotificationsOverlay({ container = document.body } = {}) {
 
   async function refresh() {
     const all = await getNotifications();
-    // N'afficher que les non-lus
     unreadNotifs = all.filter(n => !n.read);
     updateBadge();
     if (open) renderList();
@@ -149,12 +111,6 @@ export function createNotificationsOverlay({ container = document.body } = {}) {
   }
 
   // ── Events ────────────────────────────────────────────────────────────────
-  bellBtn.addEventListener('click', () => {
-    open = !open;
-    panel.style.display = open ? 'flex' : 'none';
-    if (open) renderList();
-  });
-
   readAllBtn.addEventListener('click', async () => {
     await markAllRead();
     unreadNotifs = [];
@@ -162,10 +118,25 @@ export function createNotificationsOverlay({ container = document.body } = {}) {
     renderList();
   });
 
+  // Ferme en cliquant en dehors
+  document.addEventListener('click', (e) => {
+    if (open && !panel.contains(e.target)) {
+      open = false;
+      panel.style.display = 'none';
+    }
+  });
+
   // ── Public API ────────────────────────────────────────────────────────────
-  function setLoggedIn(loggedIn) {
-    root.style.display = loggedIn ? 'flex' : 'none';
-    if (loggedIn) {
+  function toggle() {
+    if (!loggedIn) return;
+    open = !open;
+    panel.style.display = open ? 'flex' : 'none';
+    if (open) renderList();
+  }
+
+  function setLoggedIn(isLoggedIn) {
+    loggedIn = isLoggedIn;
+    if (isLoggedIn) {
       startPolling();
     } else {
       stopPolling();
@@ -178,8 +149,8 @@ export function createNotificationsOverlay({ container = document.body } = {}) {
 
   function remove() {
     stopPolling();
-    root.remove();
+    panel.remove();
   }
 
-  return { setLoggedIn, refresh, remove };
+  return { setLoggedIn, refresh, toggle, remove };
 }

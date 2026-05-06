@@ -28,6 +28,7 @@ async function buildPhotoPayload(photo) {
     height:    photo.height    ?? null,
     type:      photo.type      ?? 'image/png',
     location:  photo.location  ?? null,
+    floor:     photo.floor     ?? null,
     dataUrl,
   };
 }
@@ -90,6 +91,52 @@ export async function respondToChallenge({ photo, challengePhotoId }) {
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error || 'Échec de la soumission.');
   return data; // { id }
+}
+
+// ── MAIRE DE LA SALLE ─────────────────────────────────────────────────────
+
+export async function getRoomMayors() {
+  const res = await fetch(`${getApiBase()}/api/room-mayors`, {
+    credentials: 'include',
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || 'Impossible de récupérer les maires.');
+  return data;
+}
+
+export async function claimRoom({ locationId, photo }) {
+  if (!locationId) throw new Error('locationId manquant.');
+  const payload = await buildPhotoPayload(photo);
+  if (!payload.location) throw new Error('GPS requis pour revendiquer un lieu.');
+  const res = await fetch(`${getApiBase()}/api/room-mayors/claim`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ ...payload, locationId }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || 'Échec de la revendication.');
+  return data; // { locationId, protectionEndsAt, mayorUsername }
+}
+
+export async function getMyKingStats() {
+  const res = await fetch(`${getApiBase()}/api/me/king-stats`, {
+    credentials: 'include',
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || 'Impossible de récupérer les stats King.');
+  return data; // { lastRoom: { locationId, locationLabel, myTotalSeconds, myRank, isMayor, totalPlayers } | null }
+}
+
+export async function reportMayor(mayorId) {
+  const res = await fetch(`${getApiBase()}/api/room-mayors/${mayorId}/report`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || 'Échec du signalement.');
+  return data; // { reported: true }
 }
 
 // ── LEGACY (conservé pour compatibilité) ──────────────────────────────────

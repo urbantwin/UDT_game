@@ -8,6 +8,7 @@ import {
   getStoredUser,
 } from '../services/auth-api.js';
 import { getLeaderboard, getMyScore } from '../services/leaderboard-api.js';
+import { getMyKingStats, getRoomMayors } from '../services/challenge-api.js';
 
 const NOTIFS_KEY = 'udt-notifs-enabled';
 
@@ -18,6 +19,7 @@ export function createSettingsOverlay({
   onEnableNotifs,
   onDisableNotifs,
   onTestNotif,
+  onOpenNotifications,
 } = {}) {
   const panel = document.createElement('div');
   panel.style.cssText = `
@@ -33,6 +35,7 @@ export function createSettingsOverlay({
   let currentUser = getStoredUser();
   let notifsEnabled = false;
   let isOpen = false;
+  let gameMode = 'guessr';
 
   // ── Auth section ──────────────────────────────────────────────────────────
   const userLabel = document.createElement('div');
@@ -76,6 +79,34 @@ export function createSettingsOverlay({
   panel.appendChild(authStatus);
 
   panel.appendChild(makeDivider());
+
+  // ── Notifications ─────────────────────────────────────────────────────────
+  const notifsRow = document.createElement('div');
+  notifsRow.style.cssText = 'display:flex; align-items:center; gap:6px;';
+
+  const openNotifsBtn = makeBtn('🔔 Notifications', 'rgba(255,255,255,0.1)');
+  openNotifsBtn.style.color = '#fff';
+  openNotifsBtn.style.flex = '1';
+  openNotifsBtn.style.textAlign = 'left';
+  openNotifsBtn.addEventListener('click', () => {
+    close();
+    onOpenNotifications?.();
+  });
+
+  const notifBadge = document.createElement('span');
+  notifBadge.style.cssText = `
+    background:#ef4444; color:#fff; border-radius:10px;
+    min-width:18px; height:18px; font:bold 10px system-ui,sans-serif;
+    display:none; align-items:center; justify-content:center; padding:0 4px;
+    flex-shrink:0;
+  `;
+
+  notifsRow.appendChild(openNotifsBtn);
+  notifsRow.appendChild(notifBadge);
+  panel.appendChild(notifsRow);
+
+  panel.appendChild(makeDivider());
+
 /*
   // ── Gallery ───────────────────────────────────────────────────────────────
   const galleryBtn = makeBtn('📷 Galerie', 'rgba(255,255,255,0.1)');
@@ -145,6 +176,52 @@ export function createSettingsOverlay({
 
   panel.appendChild(scoreSection);
 
+  // ── Score King of the Campus ──────────────────────────────────────────────
+  const kingSection = document.createElement('div');
+  kingSection.style.cssText = 'display:none; flex-direction:column; gap:6px;';
+
+  const kingHeader = document.createElement('div');
+  kingHeader.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+  const kingTitle = document.createElement('span');
+  kingTitle.textContent = '👑 Dernière salle';
+  kingTitle.style.cssText = 'font-weight:600; font-size:12px;';
+  const refreshKingBtn = document.createElement('button');
+  refreshKingBtn.type = 'button';
+  refreshKingBtn.textContent = '↻';
+  refreshKingBtn.title = 'Actualiser';
+  refreshKingBtn.style.cssText = 'background:transparent; border:none; color:#9ca3af; cursor:pointer; font-size:14px; padding:0; line-height:1;';
+  kingHeader.appendChild(kingTitle);
+  kingHeader.appendChild(refreshKingBtn);
+  kingSection.appendChild(kingHeader);
+
+  const lastRoomEl = document.createElement('div');
+  lastRoomEl.style.cssText = 'font-size:12px; background:rgba(255,255,255,0.07); border-radius:6px; padding:6px 8px; line-height:1.6;';
+  lastRoomEl.textContent = 'Connectez-vous pour voir votre statut.';
+  kingSection.appendChild(lastRoomEl);
+
+  const kingLbTitle = document.createElement('div');
+  kingLbTitle.textContent = '📍 Classement par salle';
+  kingLbTitle.style.cssText = 'font-weight:600; font-size:11px; margin-top:4px;';
+  kingSection.appendChild(kingLbTitle);
+
+  const locationSelect = document.createElement('select');
+  locationSelect.style.cssText = `
+    width:100%; padding:4px 6px; border-radius:5px; border:none;
+    font:11px system-ui,sans-serif; background:#1f2937; color:#fff;
+    cursor:pointer; box-sizing:border-box; margin-top:2px;
+  `;
+  kingSection.appendChild(locationSelect);
+
+  const kingLbEl = document.createElement('div');
+  kingLbEl.style.cssText = `
+    display:flex; flex-direction:column; gap:2px;
+    background:rgba(0,0,0,0.3); border-radius:6px; padding:4px;
+    max-height:140px; overflow-y:auto;
+  `;
+  kingSection.appendChild(kingLbEl);
+
+  panel.appendChild(kingSection);
+
   panel.appendChild(makeDivider());
 
   // ── Règlement ─────────────────────────────────────────────────────────────
@@ -201,6 +278,82 @@ export function createSettingsOverlay({
     }
   }
 
+  // ── King stats ────────────────────────────────────────────────────────────
+  let mayorData = [];
+
+  function formatTotalTime(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h}h ${m}min`;
+    if (m > 0) return `${m}min ${s}s`;
+    return `${s}s`;
+  }
+
+  function renderKingLeaderboard() {
+    const selectedId = locationSelect.value;
+    const loc = mayorData.find(l => l.locationId === selectedId);
+    kingLbEl.innerHTML = '';
+    if (!loc || !loc.leaderboard?.length) {
+      const empty = document.createElement('div');
+      empty.textContent = 'Aucun joueur.';
+      empty.style.cssText = 'opacity:0.6; font:11px system-ui,sans-serif; padding:4px;';
+      kingLbEl.appendChild(empty);
+      return;
+    }
+    loc.leaderboard.forEach((entry, i) => {
+      const row = document.createElement('div');
+      const isMe = currentUser && entry.username === currentUser.username;
+      row.style.cssText = `
+        display:flex; justify-content:space-between; align-items:center;
+        padding:3px 6px; border-radius:4px; font-size:11px;
+        background:${isMe ? 'rgba(96,165,250,0.2)' : 'transparent'};
+      `;
+      const medal = i === 0 ? '👑' : `${i + 1}.`;
+      row.innerHTML = `<span>${medal} ${entry.username}</span><span style="font-weight:600">${formatTotalTime(entry.totalSeconds)}</span>`;
+      kingLbEl.appendChild(row);
+    });
+  }
+
+  async function loadKingScore() {
+    if (!currentUser) {
+      lastRoomEl.textContent = 'Connectez-vous pour voir votre statut.';
+      kingLbEl.innerHTML = '';
+      locationSelect.innerHTML = '';
+      mayorData = [];
+      return;
+    }
+    lastRoomEl.textContent = '…';
+    try {
+      const [stats, mayors] = await Promise.all([getMyKingStats(), getRoomMayors()]);
+      mayorData = mayors;
+      locationSelect.innerHTML = '';
+      mayors.forEach(loc => {
+        const opt = document.createElement('option');
+        opt.value = loc.locationId;
+        opt.textContent = loc.locationLabel;
+        locationSelect.appendChild(opt);
+      });
+      if (!stats.lastRoom) {
+        lastRoomEl.textContent = 'Aucune salle revendiquée encore.';
+      } else {
+        const r = stats.lastRoom;
+        const icon = r.isMayor ? '▶️' : '⏸️';
+        const rankStr = r.myRank ? `#${r.myRank}${r.totalPlayers > 1 ? ` / ${r.totalPlayers}` : ''}` : '';
+        lastRoomEl.innerHTML =
+          `<div style="font-size:13px;">${icon} <b>${r.locationLabel}</b></div>` +
+          `<div style="opacity:0.75;font-size:11px;">${r.isMayor ? 'Vous êtes maire' : 'Plus maire'}${rankStr ? ' · ' + rankStr : ''} · ${formatTotalTime(r.myTotalSeconds)}</div>`;
+        locationSelect.value = r.locationId;
+      }
+      renderKingLeaderboard();
+    } catch {
+      lastRoomEl.textContent = 'Erreur de chargement.';
+    }
+  }
+
+  locationSelect.addEventListener('change', renderKingLeaderboard);
+  refreshKingBtn.addEventListener('click', loadKingScore);
+
   toggleLbBtn.addEventListener('click', async () => {
     lbVisible = !lbVisible;
     lbList.style.display = lbVisible ? 'flex' : 'none';
@@ -229,7 +382,7 @@ export function createSettingsOverlay({
       passwordInput.value = '';
       authStatus.textContent = 'Connecté !';
       refreshAuthUi();
-      loadMyScore();
+      gameMode === 'king' ? loadKingScore() : loadMyScore();
       onAuthChange?.(currentUser);
     } catch (err) {
       authStatus.textContent = err.message;
@@ -247,7 +400,7 @@ export function createSettingsOverlay({
       passwordInput.value = '';
       authStatus.textContent = 'Compte créé !';
       refreshAuthUi();
-      loadMyScore();
+      gameMode === 'king' ? loadKingScore() : loadMyScore();
       onAuthChange?.(currentUser);
     } catch (err) {
       authStatus.textContent = err.message;
@@ -260,7 +413,7 @@ export function createSettingsOverlay({
     currentUser = null;
     authStatus.textContent = 'Déconnecté.';
     refreshAuthUi();
-    loadMyScore();
+    gameMode === 'king' ? loadKingScore() : loadMyScore();
     onAuthChange?.(null);
   });
 /*
@@ -314,13 +467,6 @@ export function createSettingsOverlay({
     }
   }
 
-  // Restore notifs state
-  if (localStorage.getItem(NOTIFS_KEY) === 'true' && Notification.permission === 'granted') {
-    notifsEnabled = true;
-    notifsBtn.textContent = '🔔 Désactiver notifs';
-    notifsBtn.style.background = '#4ade80';
-  }
-
   refreshAuthUi();
 
   // ── Public API ────────────────────────────────────────────────────────────
@@ -357,14 +503,35 @@ export function createSettingsOverlay({
   function setUser(user) {
     currentUser = user ?? null;
     refreshAuthUi();
-    loadMyScore();
+    if (gameMode === 'king') {
+      loadKingScore();
+    } else {
+      loadMyScore();
+    }
+  }
+
+  function setGameMode(mode) {
+    gameMode = mode;
+    if (mode === 'king') {
+      scoreSection.style.display = 'none';
+      kingSection.style.display = 'flex';
+      if (currentUser) loadKingScore();
+    } else {
+      scoreSection.style.display = 'flex';
+      kingSection.style.display = 'none';
+    }
+  }
+
+  function setNotifBadge(count) {
+    notifBadge.textContent = count > 9 ? '9+' : String(count);
+    notifBadge.style.display = count > 0 ? 'flex' : 'none';
   }
 
   function remove() {
     panel.remove();
   }
 
-  return { toggle, close, setUser, remove };
+  return { toggle, close, setUser, setGameMode, setNotifBadge, remove };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

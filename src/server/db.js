@@ -54,6 +54,8 @@ export async function getDb() {
     locationId TEXT    NOT NULL,
     createdAt  INTEGER NOT NULL
   )`);
+  // Ligne sentinelle : cible FK stable pour les soumissions du defi de la semaine (challengeId=0)
+  await run(_db, `INSERT OR IGNORE INTO challenges (id, date, locationId, createdAt) VALUES (0, '__weekly__', '__weekly__', 0)`);
 
   // Challenge requests already seen by each player.
   // Unique (userId, photoId) ensures the same photo is never served twice to a player.
@@ -157,6 +159,74 @@ export async function getDb() {
   try {
     await run(_db, 'ALTER TABLE users ADD COLUMN score INTEGER NOT NULL DEFAULT 0');
   } catch {}
+
+  // Colonne étage sur photos
+  try {
+    await run(_db, 'ALTER TABLE photos ADD COLUMN floor INTEGER');
+  } catch {}
+
+  // Defis de la semaine : un defi actif a la fois (active=1)
+  await run(_db, `CREATE TABLE IF NOT EXISTS weekly_challenges (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    type             TEXT    NOT NULL DEFAULT 'location_only',
+    locationId       TEXT    NOT NULL,
+    locationLabel    TEXT,
+    referenceDataUrl TEXT,
+    active           INTEGER NOT NULL DEFAULT 0,
+    createdAt        TEXT    NOT NULL DEFAULT (datetime('now'))
+  )`);
+
+  // Migrations souples — colonnes defi de la semaine
+  try {
+    await run(_db, 'ALTER TABLE submissions ADD COLUMN weeklyChallengeId INTEGER');
+  } catch {}
+  try {
+    await run(_db, 'ALTER TABLE photos ADD COLUMN weeklySource INTEGER DEFAULT 0');
+  } catch {}
+
+  // Maire de la Salle — periodes actives et archivees
+  await run(_db, `CREATE TABLE IF NOT EXISTS room_mayors (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    locationId       TEXT    NOT NULL,
+    userId           INTEGER NOT NULL REFERENCES users(id),
+    claimedAt        INTEGER NOT NULL,
+    protectionEndsAt INTEGER NOT NULL,
+    active           INTEGER NOT NULL DEFAULT 1,
+    photoId          INTEGER REFERENCES photos(id)
+  )`);
+
+  // Temps cumule par joueur par lieu (toutes periodes)
+  await run(_db, `CREATE TABLE IF NOT EXISTS room_mayor_totals (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    locationId   TEXT    NOT NULL,
+    userId       INTEGER NOT NULL REFERENCES users(id),
+    totalSeconds INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(locationId, userId)
+  )`);
+
+  // Signalements joueurs sur une periode de maire
+  await run(_db, `CREATE TABLE IF NOT EXISTS room_mayor_reports (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    mayorId     INTEGER NOT NULL REFERENCES room_mayors(id),
+    reportedBy  INTEGER NOT NULL REFERENCES users(id),
+    reportedAt  INTEGER NOT NULL,
+    status      TEXT    NOT NULL DEFAULT 'pending',
+    UNIQUE(mayorId, reportedBy)
+  )`);
+
+  // Colonne admin review sur room_mayors
+  try {
+    await run(_db, 'ALTER TABLE room_mayors ADD COLUMN adminReviewed INTEGER NOT NULL DEFAULT 0');
+  } catch {}
+
+  // Positions et noms personnalisés pour les lieux (admin)
+  await run(_db, `CREATE TABLE IF NOT EXISTS location_overrides (
+    locationId TEXT PRIMARY KEY,
+    label      TEXT,
+    lat        REAL,
+    lng        REAL,
+    updatedAt  INTEGER NOT NULL
+  )`);
 
   await ensureDevAccount(_db);
 

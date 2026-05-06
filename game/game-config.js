@@ -155,3 +155,8 @@ export const CHALLENGE_WINDOW = {
   start: { hour: 9, minute: 0 },   // 12:00
   end:   { hour: 23, minute: 59 },  // 23:59
 };
+
+// ─────────────────────────────────────────────
+// 9. ROOM MAYOR — protection window (seconds)
+// -----------------------------------------------------------------------------
+export const ROOM_MAYOR_PROTECTION_SECONDS = 600;

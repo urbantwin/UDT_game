@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "dev:https": "set DEV_HTTPS=1&& vite",
-    "server": "node src/server/index.js",
-    "server:https": "set DEV_HTTPS=1&& node src/server/index.js",
+    "server": "node --env-file=.env src/server/index.js",
+    "server:https": "set DEV_HTTPS=1&& node --env-file=.env src/server/index.js",
     "dev:full": "concurrently \"npm run server\" \"npm run dev\"",
     "dev:full:https": "concurrently \"npm run server:https\" \"npm run dev:https\"",
     "https:setup": "node scripts/setup-dev-https.mjs",
