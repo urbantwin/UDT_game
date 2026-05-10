@@ -218,6 +218,12 @@ export async function getDb() {
   try {
     await run(_db, 'ALTER TABLE room_mayors ADD COLUMN adminReviewed INTEGER NOT NULL DEFAULT 0');
   } catch {}
+  try {
+    await run(_db, 'ALTER TABLE room_mayors ADD COLUMN renewalDeadline INTEGER');
+  } catch {}
+  try {
+    await run(_db, 'ALTER TABLE room_mayors ADD COLUMN renewalAllowedAt INTEGER');
+  } catch {}
 
   // Positions et noms personnalisés pour les lieux (admin)
   await run(_db, `CREATE TABLE IF NOT EXISTS location_overrides (

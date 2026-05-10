@@ -157,6 +157,8 @@ export const CHALLENGE_WINDOW = {
 };
 
 // ─────────────────────────────────────────────
-// 9. ROOM MAYOR — protection window (seconds)
+// 9. ROOM MAYOR — timers (seconds)
 // -----------------------------------------------------------------------------
-export const ROOM_MAYOR_PROTECTION_SECONDS = 600;
+export const ROOM_MAYOR_PROTECTION_SECONDS      =   300; // 5 min — protection initiale après claim
+export const ROOM_MAYOR_RENEWAL_DEADLINE_SECONDS = 54000; // 15 h  — délai max avant perte de la salle
+export const ROOM_MAYOR_RENEWAL_COOLDOWN_SECONDS = 14400; // 4 h   — délai min entre deux renouvellements

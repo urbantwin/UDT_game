@@ -93,19 +93,34 @@ export function createWeeklyChallengeOverlay({
     locName.style.cssText = 'font-weight:600; font-size:12px;';
     card.appendChild(locName);
 
-    if (locData.mayor?.photoDataUrl) {
-      const thumb = document.createElement('img');
-      thumb.src = locData.mayor.photoDataUrl;
-      thumb.style.cssText = 'width:48px; height:48px; object-fit:cover; border-radius:6px;';
-      card.appendChild(thumb);
-    }
+    if (locData.mayor) {
+      const mayorLine = document.createElement('div');
+      mayorLine.style.cssText = 'font:600 11px system-ui,sans-serif; opacity:0.9;';
+      mayorLine.textContent = `👑 Maire : ${locData.mayor.username}`;
+      card.appendChild(mayorLine);
 
-    const mayorLine = document.createElement('div');
-    mayorLine.style.cssText = 'font:11px system-ui,sans-serif; opacity:0.85;';
-    mayorLine.textContent = locData.mayor
-      ? `Maire : ${locData.mayor.username}`
-      : 'Maire : Personne';
-    card.appendChild(mayorLine);
+      if (locData.mayor.photoDataUrl) {
+        const photoLabel = document.createElement('div');
+        photoLabel.textContent = '📸 Photo du lieu revendiqué';
+        photoLabel.style.cssText = 'font:10px system-ui,sans-serif; opacity:0.55; margin-top:2px;';
+        card.appendChild(photoLabel);
+
+        const photo = document.createElement('img');
+        photo.src = locData.mayor.photoDataUrl;
+        photo.title = 'Cliquer pour agrandir';
+        photo.style.cssText = `
+          width:100%; max-height:160px; object-fit:cover; border-radius:8px;
+          cursor:pointer; display:block;
+        `;
+        photo.addEventListener('click', () => window.open(locData.mayor.photoDataUrl, '_blank'));
+        card.appendChild(photo);
+      }
+    } else {
+      const mayorLine = document.createElement('div');
+      mayorLine.style.cssText = 'font:11px system-ui,sans-serif; opacity:0.55;';
+      mayorLine.textContent = 'Aucun maire — salle libre';
+      card.appendChild(mayorLine);
+    }
 
     if (locData.protectionEndsAt && locData.mayor && locData.mayor.userId !== currentUserId) {
       const countdownEl = document.createElement('span');
@@ -119,19 +134,79 @@ export function createWeeklyChallengeOverlay({
     if (locData.mayor && locData.mayor.userId === currentUserId) {
       const selfLabel = document.createElement('div');
       selfLabel.textContent = '✓ Vous êtes le maire';
-      selfLabel.style.cssText = 'font:10px system-ui,sans-serif; color:#34d399;';
+      selfLabel.style.cssText = 'font:600 10px system-ui,sans-serif; color:#34d399;';
       card.appendChild(selfLabel);
+
+      // Deadline de renouvellement (15h)
+      if (locData.mayor.renewalDeadline) {
+        const deadlineEl = document.createElement('div');
+        deadlineEl.dataset.renewalDeadline = String(locData.mayor.renewalDeadline);
+        deadlineEl.style.cssText = 'font:10px system-ui,sans-serif; color:#fbbf24;';
+        const txt = formatCountdown(locData.mayor.renewalDeadline);
+        deadlineEl.textContent = txt ? `⏰ Renouveler avant : ${txt}` : '⚠️ Délai dépassé !';
+        card.appendChild(deadlineEl);
+      }
     }
 
+    const nowSec = Math.floor(Date.now() / 1000);
     const isProtectedByOther = locData.protectionEndsAt &&
       locData.mayor && locData.mayor.userId !== currentUserId &&
-      locData.protectionEndsAt > Math.floor(Date.now() / 1000);
+      locData.protectionEndsAt > nowSec;
 
-    if (!isProtectedByOther) {
+    const isSelf = locData.mayor && locData.mayor.userId === currentUserId;
+
+    if (isSelf) {
+      // Bouton renouvellement pour le maire — bloqué si cooldown actif
+      const cooldownActive = locData.mayor.renewalAllowedAt && nowSec < locData.mayor.renewalAllowedAt;
+      const renewBtn = document.createElement('button');
+      renewBtn.type = 'button';
+      renewBtn.style.cssText = `
+        min-height:44px; padding:8px 12px;
+        font:12px system-ui,sans-serif; font-weight:600;
+        border:none; border-radius:6px;
+        -webkit-tap-highlight-color:transparent;
+        ${cooldownActive
+          ? 'background:rgba(255,255,255,0.1); color:rgba(255,255,255,0.4); cursor:not-allowed;'
+          : 'background:#60a5fa; color:#111827; cursor:pointer;'}
+      `;
+      if (cooldownActive) {
+        const waitSec = locData.mayor.renewalAllowedAt - nowSec;
+        const h = Math.floor(waitSec / 3600);
+        const m = Math.floor((waitSec % 3600) / 60);
+        const waitStr = h > 0 ? `${h}h ${m}min` : `${m} min`;
+        renewBtn.textContent = `🔄 Renouveler dans ${waitStr}`;
+        renewBtn.dataset.renewalAllowedAt = String(locData.mayor.renewalAllowedAt);
+        renewBtn.disabled = true;
+      } else {
+        renewBtn.textContent = '🔄 Renouveler la photo';
+        renewBtn.addEventListener('click', () => {
+          onClaimRoom?.(locData.locationId);
+          closePanel();
+        });
+      }
+      card.appendChild(renewBtn);
+
+    } else if (isProtectedByOther) {
+      // Salle protégée — afficher quand disponible
+      const waitBtn = document.createElement('button');
+      waitBtn.type = 'button';
+      waitBtn.disabled = true;
+      waitBtn.style.cssText = `
+        min-height:44px; padding:8px 12px;
+        background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.4);
+        font:12px system-ui,sans-serif; font-weight:600;
+        border:none; border-radius:6px; cursor:not-allowed;
+      `;
+      const protTxt = formatCountdown(locData.protectionEndsAt);
+      waitBtn.textContent = protTxt ? `🔒 Revendiquer dans ${protTxt}` : '📍 Revendiquer';
+      waitBtn.dataset.protectionEnds = String(locData.protectionEndsAt);
+      card.appendChild(waitBtn);
+
+    } else {
+      // Salle libre ou protection expirée — on peut revendiquer
       const claimBtn = document.createElement('button');
       claimBtn.type = 'button';
-      const isSelf = locData.mayor && locData.mayor.userId === currentUserId;
-      claimBtn.textContent = isSelf ? '🔄 Renouveler' : '📍 Revendiquer';
+      claimBtn.textContent = '📍 Revendiquer';
       claimBtn.style.cssText = `
         min-height:44px; padding:8px 12px;
         background:#60a5fa; color:#111827;
@@ -149,25 +224,31 @@ export function createWeeklyChallengeOverlay({
     if (locData.mayor && locData.mayor.userId !== currentUserId && currentUserId) {
       const reportBtn = document.createElement('button');
       reportBtn.type = 'button';
-      reportBtn.textContent = '🚩 Signaler';
+      reportBtn.textContent = '🚩 Photo incorrecte — Signaler à l\'admin';
       reportBtn.style.cssText = `
         min-height:44px; padding:6px 10px;
-        background:rgba(255,255,255,0.08); color:#fca5a5;
+        background:rgba(255,255,255,0.06); color:#fca5a5;
         font:11px system-ui,sans-serif;
-        border:1px solid rgba(252,165,165,0.3); border-radius:6px; cursor:pointer;
-        -webkit-tap-highlight-color:transparent;
+        border:1px solid rgba(252,165,165,0.25); border-radius:6px; cursor:pointer;
+        -webkit-tap-highlight-color:transparent; text-align:left;
       `;
+      const reportStatus = document.createElement('div');
+      reportStatus.style.cssText = 'font:10px system-ui,sans-serif; opacity:0.65; min-height:12px;';
       reportBtn.addEventListener('click', async () => {
         reportBtn.disabled = true;
+        reportStatus.textContent = '…';
         try {
           await reportMayor(locData.mayor.mayorId);
-          reportBtn.textContent = '✓ Signalement envoyé';
+          reportBtn.textContent = '✓ Signalement envoyé à l\'admin';
+          reportStatus.textContent = 'L\'admin examinera la photo et te notifiera.';
         } catch (err) {
           reportBtn.textContent = err.message || 'Erreur';
           reportBtn.disabled = false;
+          reportStatus.textContent = '';
         }
       });
       card.appendChild(reportBtn);
+      card.appendChild(reportStatus);
     }
 
     const lb = renderLeaderboard(locData.leaderboard);
@@ -191,13 +272,36 @@ export function createWeeklyChallengeOverlay({
   }
 
   function tickCountdowns() {
-    for (const span of panel.querySelectorAll('[data-protection-ends]')) {
-      const endsAt = Number(span.dataset.protectionEnds);
+    const nowSec = Math.floor(Date.now() / 1000);
+
+    for (const el of panel.querySelectorAll('[data-protection-ends]')) {
+      const endsAt = Number(el.dataset.protectionEnds);
       const txt = formatCountdown(endsAt);
-      if (txt) {
-        span.textContent = `🔒 Protégé encore ${txt}`;
+      el.textContent = txt ? `🔒 Protégé encore ${txt}` : '';
+    }
+
+    for (const el of panel.querySelectorAll('[data-renewal-deadline]')) {
+      const endsAt = Number(el.dataset.renewalDeadline);
+      const txt = formatCountdown(endsAt);
+      el.textContent = txt ? `⏰ Renouveler avant : ${txt}` : '⚠️ Délai dépassé !';
+      el.style.color = (endsAt - nowSec) < 3600 ? '#ef4444' : '#fbbf24';
+    }
+
+    for (const el of panel.querySelectorAll('[data-renewal-allowed-at]')) {
+      const allowedAt = Number(el.dataset.renewalAllowedAt);
+      if (nowSec >= allowedAt) {
+        el.textContent = '🔄 Renouveler la photo';
+        el.disabled = false;
+        el.style.background = '#60a5fa';
+        el.style.color = '#111827';
+        el.style.cursor = 'pointer';
+        delete el.dataset.renewalAllowedAt;
       } else {
-        span.textContent = '';
+        const waitSec = allowedAt - nowSec;
+        const h = Math.floor(waitSec / 3600);
+        const m = Math.floor((waitSec % 3600) / 60);
+        const waitStr = h > 0 ? `${h}h ${m}min` : `${m} min`;
+        el.textContent = `🔄 Renouveler dans ${waitStr}`;
       }
     }
   }

@@ -60,6 +60,28 @@ export async function getAdminAllHistory() {
   return data;
 }
 
+export async function getAdminPendingReports() {
+  const res = await fetch(`${getApiBase()}/api/admin/room-mayors/reports`, {
+    credentials: 'include',
+    headers: { ...authHeaders() },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || 'Erreur chargement signalements.');
+  return data;
+}
+
+export async function reviewReport(reportId, decision) {
+  const res = await fetch(`${getApiBase()}/api/admin/room-mayors/reports/${reportId}/review`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ decision }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || 'Échec de la revue.');
+  return data;
+}
+
 export async function getAdminPendingMayors() {
   const res = await fetch(`${getApiBase()}/api/admin/room-mayors/pending`, {
     credentials: 'include',

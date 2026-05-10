@@ -16,7 +16,7 @@ import {
   destroyUserSession,
   getSessionConfig
 } from './auth.js';
-import { CHALLENGE_WINDOW, GAME_SETTINGS, SUBMISSION_WINDOW, getTodayLocation, ROOM_MAYOR_PROTECTION_SECONDS, MINIGAMES } from '../../game/game-config.js';
+import { CHALLENGE_WINDOW, GAME_SETTINGS, SUBMISSION_WINDOW, getTodayLocation, ROOM_MAYOR_PROTECTION_SECONDS, ROOM_MAYOR_RENEWAL_DEADLINE_SECONDS, ROOM_MAYOR_RENEWAL_COOLDOWN_SECONDS, MINIGAMES } from '../../game/game-config.js';
 import { getLocationById, EPFL_LOCATIONS } from '../../game/epfl-locations.js';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
@@ -705,6 +705,32 @@ app.post('/api/challenge/:id/submit', requireAuth, async (req, res) => {
 
 // -- MAIRE DE LA SALLE ----------------------------------------
 
+// Expire les salles dont le délai de renouvellement (15h) est dépassé
+async function expireDeadlinedMayors(db) {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const expired = await all(db,
+    `SELECT id, locationId, userId, claimedAt FROM room_mayors
+     WHERE active = 1 AND renewalDeadline IS NOT NULL AND renewalDeadline < ?`,
+    [nowSeconds]
+  );
+  for (const m of expired) {
+    await run(db, 'UPDATE room_mayors SET active = 0 WHERE id = ?', [m.id]);
+    const elapsed = nowSeconds - m.claimedAt;
+    await run(db,
+      `INSERT INTO room_mayor_totals (locationId, userId, totalSeconds) VALUES (?, ?, ?)
+       ON CONFLICT(locationId, userId) DO UPDATE SET totalSeconds = totalSeconds + excluded.totalSeconds`,
+      [m.locationId, m.userId, elapsed]
+    );
+    const locLabel = EPFL_LOCATIONS.find(l => l.id === m.locationId)?.label ?? m.locationId;
+    await run(db,
+      'INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)',
+      [m.userId, 'mayor_expired',
+       `⏰ Tu as perdu le titre de maire de "${locLabel}" — photo non renouvelée dans les 15h. La salle est redevenue libre.`,
+       Date.now()]
+    );
+  }
+}
+
 // Helper : charge les labels personnalisés et retourne une fonction getLabel(locationId)
 async function buildLabelResolver(db) {
   const rows = await all(db, 'SELECT locationId, label FROM location_overrides', []);
@@ -758,10 +784,12 @@ app.post('/api/admin/locations/:locationId', requireAuth, requireDevAccess, asyn
 app.get('/api/room-mayors', async (_req, res) => {
   try {
     const db = await getDb();
+    await expireDeadlinedMayors(db);
     const getLabel = await buildLabelResolver(db);
     const results = await Promise.all(EPFL_LOCATIONS.map(async (loc) => {
       const mayor = (await all(db,
         `SELECT rm.id AS mayorId, rm.userId, rm.protectionEndsAt,
+                rm.renewalDeadline, rm.renewalAllowedAt,
                 u.username, p.dataUrl AS photoDataUrl
          FROM room_mayors rm
          JOIN users u ON u.id = rm.userId
@@ -795,6 +823,8 @@ app.get('/api/room-mayors', async (_req, res) => {
           mayorId: mayor.mayorId,
           photoDataUrl: mayor.photoDataUrl ?? null,
           pendingReports,
+          renewalDeadline: mayor.renewalDeadline ?? null,
+          renewalAllowedAt: mayor.renewalAllowedAt ?? null,
         } : null,
         protectionEndsAt: mayor ? mayor.protectionEndsAt : null,
         leaderboard,
@@ -825,7 +855,7 @@ app.get('/api/me/king-stats', requireAuth, async (req, res) => {
     const loc = EPFL_LOCATIONS.find(l => l.id === lastMayor.locationId);
 
     const activeMayor = (await all(db,
-      'SELECT userId, claimedAt FROM room_mayors WHERE locationId = ? AND active = 1 LIMIT 1',
+      'SELECT userId, claimedAt, renewalDeadline, renewalAllowedAt FROM room_mayors WHERE locationId = ? AND active = 1 LIMIT 1',
       [lastMayor.locationId]
     ))[0];
     const isMayor = activeMayor?.userId === req.user.id;
@@ -853,6 +883,8 @@ app.get('/api/me/king-stats', requireAuth, async (req, res) => {
         myRank: rank > 0 ? rank : null,
         isMayor,
         totalPlayers: allTotals.length,
+        renewalDeadline:  isMayor ? (activeMayor?.renewalDeadline ?? null)  : null,
+        renewalAllowedAt: isMayor ? (activeMayor?.renewalAllowedAt ?? null) : null,
       },
     });
   } catch (err) {
@@ -890,28 +922,42 @@ app.post('/api/room-mayors/claim', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
     const nowSeconds = Math.floor(Date.now() / 1000);
+    await expireDeadlinedMayors(db);
+
     const activeMayor = (await all(db,
-      'SELECT id, userId, claimedAt, protectionEndsAt FROM room_mayors WHERE locationId = ? AND active = 1 LIMIT 1',
+      'SELECT id, userId, claimedAt, protectionEndsAt, renewalAllowedAt FROM room_mayors WHERE locationId = ? AND active = 1 LIMIT 1',
       [locationId]
     ))[0] ?? null;
 
     if (activeMayor && activeMayor.userId === req.user.id) {
-      // Re-claim par le maire actuel : reset protection uniquement
+      // Vérifier le cooldown de 4h entre renouvellements
+      if (activeMayor.renewalAllowedAt && nowSeconds < activeMayor.renewalAllowedAt) {
+        const waitSecs = activeMayor.renewalAllowedAt - nowSeconds;
+        const waitH = Math.floor(waitSecs / 3600);
+        const waitM = Math.floor((waitSecs % 3600) / 60);
+        const waitStr = waitH > 0 ? `${waitH}h ${waitM}min` : `${waitM} min`;
+        return res.status(429).json({ error: `Tu pourras renouveler ta photo dans ${waitStr}.` });
+      }
+      // Renouvellement : reset protection + deadline + cooldown
+      const newRenewalDeadline  = nowSeconds + ROOM_MAYOR_RENEWAL_DEADLINE_SECONDS;
+      const newRenewalAllowedAt = nowSeconds + ROOM_MAYOR_RENEWAL_COOLDOWN_SECONDS;
       await run(db,
-        'UPDATE room_mayors SET protectionEndsAt = ? WHERE id = ?',
-        [nowSeconds + ROOM_MAYOR_PROTECTION_SECONDS, activeMayor.id]
+        'UPDATE room_mayors SET protectionEndsAt = ?, renewalDeadline = ?, renewalAllowedAt = ? WHERE id = ?',
+        [nowSeconds + ROOM_MAYOR_PROTECTION_SECONDS, newRenewalDeadline, newRenewalAllowedAt, activeMayor.id]
       );
-      // Photo insérée quand même (alimente le digital twin)
-      await run(db,
+      const photoResult = await run(db,
         `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, category, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'contribution', 'pending')`,
         [req.user.id, clientId ?? null, createdAt ?? Date.now(),
          width ?? null, height ?? null, type ?? 'image/png',
          JSON.stringify(location), dataUrl]
       );
+      // Mettre à jour la photo associée au maire
+      await run(db, 'UPDATE room_mayors SET photoId = ? WHERE id = ?', [photoResult.lastID, activeMayor.id]);
       return res.status(201).json({
         locationId,
         protectionEndsAt: nowSeconds + ROOM_MAYOR_PROTECTION_SECONDS,
+        renewalDeadline: newRenewalDeadline,
         mayorUsername: req.user.username,
       });
     }
@@ -935,7 +981,6 @@ app.post('/api/room-mayors/claim', requireAuth, async (req, res) => {
       );
     }
 
-    // Insérer la photo en bucket 1
     const photoResult = await run(db,
       `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, category, status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'contribution', 'pending')`,
@@ -944,17 +989,19 @@ app.post('/api/room-mayors/claim', requireAuth, async (req, res) => {
        JSON.stringify(location), dataUrl]
     );
     const photoId = photoResult.lastID;
+    const renewalDeadline  = nowSeconds + ROOM_MAYOR_RENEWAL_DEADLINE_SECONDS;
+    const renewalAllowedAt = nowSeconds + ROOM_MAYOR_RENEWAL_COOLDOWN_SECONDS;
 
-    // Nouveau maire
     await run(db,
-      `INSERT INTO room_mayors (locationId, userId, claimedAt, protectionEndsAt, active, photoId)
-       VALUES (?, ?, ?, ?, 1, ?)`,
-      [locationId, req.user.id, nowSeconds, nowSeconds + ROOM_MAYOR_PROTECTION_SECONDS, photoId]
+      `INSERT INTO room_mayors (locationId, userId, claimedAt, protectionEndsAt, active, photoId, renewalDeadline, renewalAllowedAt)
+       VALUES (?, ?, ?, ?, 1, ?, ?, ?)`,
+      [locationId, req.user.id, nowSeconds, nowSeconds + ROOM_MAYOR_PROTECTION_SECONDS, photoId, renewalDeadline, renewalAllowedAt]
     );
 
     res.status(201).json({
       locationId,
       protectionEndsAt: nowSeconds + ROOM_MAYOR_PROTECTION_SECONDS,
+      renewalDeadline,
       mayorUsername: req.user.username,
     });
   } catch (err) {
@@ -1025,10 +1072,8 @@ app.get('/api/admin/room-mayors/pending', requireAuth, requireDevAccess, async (
        ORDER BY rm.claimedAt DESC`,
       []
     );
-    res.json(rows.map(r => ({
-      ...r,
-      locationLabel: EPFL_LOCATIONS.find(l => l.id === r.locationId)?.label ?? r.locationId,
-    })));
+    const getLabel = await buildLabelResolver(db);
+    res.json(rows.map(r => ({ ...r, locationLabel: getLabel(r.locationId) })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1062,6 +1107,102 @@ app.get('/api/admin/room-mayors/all-history', requireAuth, requireDevAccess, asy
     });
 
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/admin/room-mayors/reports — signalements joueurs en attente
+app.get('/api/admin/room-mayors/reports', requireAuth, requireDevAccess, async (req, res) => {
+  try {
+    const db = await getDb();
+    const getLabel = await buildLabelResolver(db);
+    const rows = await all(db,
+      `SELECT rmr.id AS reportId, rmr.mayorId, rmr.reportedBy, rmr.reportedAt,
+              rm.locationId, rm.active AS mayorActive,
+              u_mayor.username AS mayorUsername,
+              u_reporter.username AS reporterUsername,
+              p.dataUrl AS photoDataUrl
+       FROM room_mayor_reports rmr
+       JOIN room_mayors rm ON rm.id = rmr.mayorId
+       JOIN users u_mayor ON u_mayor.id = rm.userId
+       JOIN users u_reporter ON u_reporter.id = rmr.reportedBy
+       LEFT JOIN photos p ON p.id = rm.photoId
+       WHERE rmr.status = 'pending'
+       ORDER BY rmr.reportedAt DESC`,
+      []
+    );
+    res.json(rows.map(r => ({ ...r, locationLabel: getLabel(r.locationId) })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/admin/room-mayors/reports/:reportId/review — valider ou rejeter un signalement
+app.post('/api/admin/room-mayors/reports/:reportId/review', requireAuth, requireDevAccess, async (req, res) => {
+  const reportId = parseInt(req.params.reportId, 10);
+  if (!Number.isInteger(reportId) || reportId <= 0) {
+    res.status(400).json({ error: 'reportId invalide.' }); return;
+  }
+  const { decision } = req.body || {};
+  if (decision !== 'validate' && decision !== 'dismiss') {
+    res.status(400).json({ error: 'decision doit être validate ou dismiss.' }); return;
+  }
+  try {
+    const db = await getDb();
+    const getLabel = await buildLabelResolver(db);
+    // La FK rmr.mayorId → room_mayors.id identifie la période spécifique signalée.
+    // mayorUserId est donc toujours l'auteur de la photo signalée, indépendamment
+    // de qui est maire actuellement (un nouveau maire aurait un room_mayors.id différent).
+    const report = (await all(db,
+      `SELECT rmr.id, rmr.mayorId, rmr.reportedBy, rm.locationId,
+              rm.userId AS mayorUserId, rm.active AS mayorActive
+       FROM room_mayor_reports rmr
+       JOIN room_mayors rm ON rm.id = rmr.mayorId
+       WHERE rmr.id = ? AND rmr.status = 'pending'`,
+      [reportId]
+    ))[0];
+    if (!report) { res.status(404).json({ error: 'Signalement introuvable ou déjà traité.' }); return; }
+    const locLabel = getLabel(report.locationId);
+
+    if (decision === 'validate') {
+      // Signalement valide — pénalise le maire
+      await run(db, `UPDATE room_mayor_reports SET status = 'resolved_approved' WHERE id = ?`, [reportId]);
+      if (report.mayorActive) {
+        await run(db, 'UPDATE room_mayors SET active = 0 WHERE id = ?', [report.mayorId]);
+      }
+      await run(db,
+        'UPDATE room_mayor_totals SET totalSeconds = 0 WHERE locationId = ? AND userId = ?',
+        [report.locationId, report.mayorUserId]
+      );
+      await run(db,
+        'INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)',
+        [report.mayorUserId, 'photo_rejected',
+         `🚩 Photo incorrecte — ton image pour "${locLabel}" a été signalée et jugée invalide par l'admin. Ton chrono est remis à 0.${report.mayorActive ? ' Tu perds ton titre de maire.' : ''}`,
+         Date.now()]
+      );
+      await run(db,
+        'INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)',
+        [report.reportedBy, 'report_validated',
+         `✅ Ton signalement pour "${locLabel}" a été validé par l'admin. Merci !`,
+         Date.now()]
+      );
+    } else {
+      // Signalement abusif — malus au signaleur (-30min)
+      await run(db, `UPDATE room_mayor_reports SET status = 'resolved_rejected' WHERE id = ?`, [reportId]);
+      await run(db,
+        `INSERT INTO room_mayor_totals (locationId, userId, totalSeconds) VALUES (?, ?, 0)
+         ON CONFLICT(locationId, userId) DO UPDATE SET totalSeconds = MAX(0, totalSeconds - 1800)`,
+        [report.locationId, report.reportedBy]
+      );
+      await run(db,
+        'INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)',
+        [report.reportedBy, 'false_report',
+         `🚫 Ton signalement pour "${locLabel}" a été rejeté — la photo était valide. Malus : -30min sur ton chrono de cette salle.`,
+         Date.now()]
+      );
+    }
+    res.json({ decision, reportId, locationId: report.locationId });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

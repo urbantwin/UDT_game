@@ -1,4 +1,4 @@
-import { getAdminPhotosByBucket, reviewPhoto, awardUnbeaten, getAdminPendingMayors, getAdminAllHistory, reviewMayor, saveLocationOverride } from '../services/admin-api.js';
+import { getAdminPhotosByBucket, reviewPhoto, awardUnbeaten, getAdminPendingMayors, getAdminAllHistory, reviewMayor, saveLocationOverride, getAdminPendingReports, reviewReport } from '../services/admin-api.js';
 import { getLocationOverrides } from '../services/locations-api.js';
 import { createWeeklySection } from './admin-weekly-challenge-section.js';
 import { EPFL_LOCATIONS } from '../../../game/epfl-locations.js';
@@ -69,7 +69,7 @@ export function createAdminGalleryView({ container = document.body, map = null, 
   panel.appendChild(scrollArea);
 
   let activeBucket = 1;
-  let activeView = 'bucket'; // 'bucket' | 'weekly' | 'mayors' | 'salles' | 'pins'
+  let activeView = 'bucket'; // 'bucket' | 'weekly' | 'mayors' | 'salles' | 'pins' | 'reports'
 
   BUCKETS.forEach(b => {
     const tab = document.createElement('button');
@@ -124,6 +124,23 @@ export function createAdminGalleryView({ container = document.body, map = null, 
     loadMayorReviews();
   });
   tabBar.appendChild(mayorTabBtn);
+
+  // Onglet Signalements joueurs
+  const reportsTabBtn = document.createElement('button');
+  reportsTabBtn.type = 'button';
+  reportsTabBtn.textContent = '🚩 Signalements';
+  reportsTabBtn.dataset.tab = 'reports';
+  reportsTabBtn.style.cssText = `
+    background:rgba(255,255,255,0.08); color:#fff; border:1px solid rgba(255,255,255,0.15);
+    border-radius:5px; padding:3px 7px; cursor:pointer; font:10px system-ui,sans-serif;
+  `;
+  reportsTabBtn.addEventListener('click', () => {
+    removeDragMarkers();
+    activeView = 'reports';
+    updateTabStyles();
+    loadReportsView();
+  });
+  tabBar.appendChild(reportsTabBtn);
 
   // Onglet Pins (déplacement + renommage)
   const pinsTabBtn = document.createElement('button');
@@ -181,6 +198,11 @@ export function createAdminGalleryView({ container = document.body, map = null, 
       if (tab.dataset.tab === 'pins') {
         tab.style.background = activeView === 'pins' ? '#f472b6' : 'rgba(255,255,255,0.08)';
         tab.style.color       = activeView === 'pins' ? '#111827' : '#fff';
+        continue;
+      }
+      if (tab.dataset.tab === 'reports') {
+        tab.style.background = activeView === 'reports' ? '#f87171' : 'rgba(255,255,255,0.08)';
+        tab.style.color       = activeView === 'reports' ? '#111827' : '#fff';
         continue;
       }
       const bid = Number(tab.dataset.bucket);
@@ -515,6 +537,130 @@ export function createAdminGalleryView({ container = document.body, map = null, 
     }
   }
 
+  // ── Reports (signalements joueurs) ───────────────────────────────────────
+  async function loadReportsView() {
+    scrollArea.scrollTop = 0;
+    content.innerHTML = '';
+    const loading = document.createElement('div');
+    loading.textContent = 'Chargement…';
+    loading.style.cssText = 'opacity:0.7; font:12px system-ui,sans-serif;';
+    content.appendChild(loading);
+    try {
+      const items = await getAdminPendingReports();
+      content.innerHTML = '';
+      if (!items.length) {
+        const empty = document.createElement('div');
+        empty.textContent = 'Aucun signalement en attente.';
+        empty.style.cssText = 'opacity:0.7; font:12px system-ui,sans-serif;';
+        content.appendChild(empty);
+        return;
+      }
+      for (const item of items) content.appendChild(buildReportRow(item));
+    } catch (err) {
+      content.innerHTML = '';
+      const errEl = document.createElement('div');
+      errEl.textContent = err.message || 'Erreur de chargement.';
+      errEl.style.color = '#fca5a5';
+      content.appendChild(errEl);
+    }
+  }
+
+  function buildReportRow(item) {
+    const row = document.createElement('div');
+    row.style.cssText = `
+      display:flex; flex-direction:column; gap:6px;
+      background:rgba(248,113,113,0.08); padding:8px; border-radius:8px;
+      border-left:3px solid rgba(248,113,113,0.5);
+    `;
+
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+    const locEl = document.createElement('div');
+    locEl.style.cssText = 'font:700 12px system-ui,sans-serif;';
+    locEl.textContent = `🚩 ${item.locationLabel}`;
+    const dateEl = document.createElement('div');
+    dateEl.style.cssText = 'font:10px system-ui,sans-serif; opacity:0.55;';
+    dateEl.textContent = new Date(item.reportedAt).toLocaleString('fr-FR', { hour12: false });
+    hdr.appendChild(locEl);
+    hdr.appendChild(dateEl);
+    row.appendChild(hdr);
+
+    // Cible de la pénalité = auteur de la photo spécifique, pas le maire actuel
+    const targetBox = document.createElement('div');
+    targetBox.style.cssText = `
+      background:rgba(251,191,36,0.12); border:1px solid rgba(251,191,36,0.3);
+      border-radius:6px; padding:6px 8px; font:11px system-ui,sans-serif;
+      display:flex; flex-direction:column; gap:2px;
+    `;
+    const targetLine = document.createElement('div');
+    targetLine.style.cssText = 'font-weight:600;';
+    targetLine.textContent = `⚠️ Joueur pénalisé si validé : ${item.mayorUsername}`;
+    const statusLine = document.createElement('div');
+    statusLine.style.cssText = `opacity:0.75; font-size:10px; color:${item.mayorActive ? '#86efac' : '#fca5a5'};`;
+    statusLine.textContent = item.mayorActive
+      ? '✓ Ce joueur est encore maire actif de cette salle'
+      : '✗ Ce joueur n\'est plus maire (remplacé depuis) — la pénalité reste sur lui';
+    targetBox.appendChild(targetLine);
+    targetBox.appendChild(statusLine);
+    row.appendChild(targetBox);
+
+    row.appendChild(metaLine(`👤 Signalé par : ${item.reporterUsername}`, 0.7));
+
+    if (item.photoDataUrl) {
+      const photoLabel = document.createElement('div');
+      photoLabel.textContent = '📸 Photo de la revendication';
+      photoLabel.style.cssText = 'font:10px system-ui,sans-serif; opacity:0.55;';
+      row.appendChild(photoLabel);
+      const img = document.createElement('img');
+      img.src = item.photoDataUrl;
+      img.style.cssText = 'width:100%; max-height:160px; object-fit:cover; border-radius:6px; cursor:pointer;';
+      img.addEventListener('click', () => window.open(item.photoDataUrl, '_blank'));
+      row.appendChild(img);
+    } else {
+      row.appendChild(metaLine('Aucune photo disponible.', 0.5));
+    }
+
+    const actionsRow = document.createElement('div');
+    actionsRow.style.cssText = 'display:flex; gap:6px; align-items:center; flex-wrap:wrap;';
+    const validateBtn = makeBtn('✓ Photo invalide — Pénaliser maire', '#86efac');
+    const dismissBtn  = makeBtn('✕ Signalement abusif — Malus signaleur', '#fca5a5');
+    const statusEl    = document.createElement('div');
+    statusEl.style.cssText = 'font-size:10px; opacity:0.8; width:100%;';
+
+    validateBtn.addEventListener('click', async () => {
+      validateBtn.disabled = true; dismissBtn.disabled = true;
+      statusEl.textContent = '…';
+      try {
+        await reviewReport(item.reportId, 'validate');
+        statusEl.textContent = `✓ Maire pénalisé${item.mayorActive ? ', salle libérée' : ''}. Reporter notifié.`;
+        setTimeout(() => loadReportsView(), 1000);
+      } catch (err) {
+        statusEl.textContent = err.message || 'Erreur';
+        validateBtn.disabled = false; dismissBtn.disabled = false;
+      }
+    });
+
+    dismissBtn.addEventListener('click', async () => {
+      validateBtn.disabled = true; dismissBtn.disabled = true;
+      statusEl.textContent = '…';
+      try {
+        await reviewReport(item.reportId, 'dismiss');
+        statusEl.textContent = '✕ Signalement rejeté. Malus -30min appliqué au signaleur.';
+        setTimeout(() => loadReportsView(), 1000);
+      } catch (err) {
+        statusEl.textContent = err.message || 'Erreur';
+        validateBtn.disabled = false; dismissBtn.disabled = false;
+      }
+    });
+
+    actionsRow.appendChild(validateBtn);
+    actionsRow.appendChild(dismissBtn);
+    actionsRow.appendChild(statusEl);
+    row.appendChild(actionsRow);
+
+    return row;
+  }
+
   // ── Mayor reviews ────────────────────────────────────────────────────────
   async function loadMayorReviews() {
     scrollArea.scrollTop = 0;
@@ -818,6 +964,7 @@ export function createAdminGalleryView({ container = document.body, map = null, 
     else if (activeView === 'mayors') loadMayorReviews();
     else if (activeView === 'salles') loadSallesView();
     else if (activeView === 'pins') loadPinsView();
+    else if (activeView === 'reports') loadReportsView();
     else loadBucket(activeBucket);
   });
 

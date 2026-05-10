@@ -340,9 +340,23 @@ export function createSettingsOverlay({
         const r = stats.lastRoom;
         const icon = r.isMayor ? '▶️' : '⏸️';
         const rankStr = r.myRank ? `#${r.myRank}${r.totalPlayers > 1 ? ` / ${r.totalPlayers}` : ''}` : '';
+        let deadlineHtml = '';
+        if (r.isMayor && r.renewalDeadline) {
+          const remaining = r.renewalDeadline - Math.floor(Date.now() / 1000);
+          if (remaining > 0) {
+            const h = Math.floor(remaining / 3600);
+            const m = Math.floor((remaining % 3600) / 60);
+            const timeStr = h > 0 ? `${h}h ${m}min` : `${m} min`;
+            const urgent = remaining < 3600;
+            deadlineHtml = `<div style="font-size:10px;color:${urgent ? '#ef4444' : '#fbbf24'};margin-top:2px;">⏰ Renouveler avant ${timeStr}</div>`;
+          } else {
+            deadlineHtml = `<div style="font-size:10px;color:#ef4444;margin-top:2px;">⚠️ Délai dépassé</div>`;
+          }
+        }
         lastRoomEl.innerHTML =
           `<div style="font-size:13px;">${icon} <b>${r.locationLabel}</b></div>` +
-          `<div style="opacity:0.75;font-size:11px;">${r.isMayor ? 'Vous êtes maire' : 'Plus maire'}${rankStr ? ' · ' + rankStr : ''} · ${formatTotalTime(r.myTotalSeconds)}</div>`;
+          `<div style="opacity:0.75;font-size:11px;">${r.isMayor ? 'Vous êtes maire' : 'Plus maire'}${rankStr ? ' · ' + rankStr : ''} · ${formatTotalTime(r.myTotalSeconds)}</div>` +
+          deadlineHtml;
         locationSelect.value = r.locationId;
       }
       renderKingLeaderboard();
