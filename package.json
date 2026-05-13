@@ -22,6 +22,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.49.8",
     "bcryptjs": "^2.4.3",
+    "connect-pg-simple": "^10.0.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "express-session": "^1.18.2",

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import session from 'express-session';
+import connectPg from 'connect-pg-simple';
 import { createServer as createHttpServer } from 'http';
 import { createServer as createHttpsServer } from 'https';
 import { WebSocketServer } from 'ws';
@@ -38,6 +39,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const certPath = path.resolve(__dirname, '../../certs/dev-cert.pem');
 const keyPath = path.resolve(__dirname, '../../certs/dev-key.pem');
+const distPath = path.resolve(__dirname, '../../dist');
+
+const dbPool = await getDb();
+const PgStore = connectPg(session);
 
 const app = express();
 app.set('trust proxy', 1);
@@ -46,6 +51,11 @@ app.use(cors({
   credentials: true
 }));
 app.use(session({
+  store: new PgStore({
+    pool: dbPool,
+    tableName: 'user_sessions',
+    createTableIfMissing: true
+  }),
   name: SESSION_COOKIE_NAME,
   secret: SESSION_SECRET,
   resave: false,
@@ -1681,6 +1691,17 @@ app.post('/api/notifications/:id/read', requireAuth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(distPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path === '/ws') {
+      next();
+      return;
+    }
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
 
 function getHttpsConfig() {
   if (!useHttps) return null;
