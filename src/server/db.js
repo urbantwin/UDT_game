@@ -1,203 +1,168 @@
-﻿import sqlite3 from 'sqlite3';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+﻿import pg from 'pg';
 import { hashPassword } from './auth.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DB_PATH = join(__dirname, '../../data/photos.db');
+const { Pool } = pg;
 
-// Wrap sqlite3 callbacks in promises
-function openDb(path) {
-  return new Promise((resolve, reject) => {
-    const db = new sqlite3.Database(path, (err) => {
-      if (err) reject(err);
-      else resolve(db);
-    });
-  });
-}
+const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL;
 
 let _db = null;
+let _initPromise = null;
+
+function createPool() {
+  if (!DATABASE_URL) {
+    throw new Error('Missing PostgreSQL connection string. Set DATABASE_URL in your environment.');
+  }
+
+  // Supabase/Render generally require SSL; local PostgreSQL often does not.
+  const disableSsl = process.env.PG_DISABLE_SSL === '1' || process.env.PG_DISABLE_SSL === 'true';
+  const useSsl = !disableSsl && !/localhost|127\.0\.0\.1/i.test(DATABASE_URL);
+
+  const pool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: useSsl ? { rejectUnauthorized: false } : false,
+  });
+
+  pool.on('error', (err) => {
+    console.error('Unexpected PostgreSQL pool error:', err);
+  });
+
+  return pool;
+}
 
 export async function getDb() {
-  if (_db) return _db;
-  _db = await openDb(DB_PATH);
+  if (!_db) {
+    _db = createPool();
+  }
+  if (!_initPromise) {
+    _initPromise = initializeSchema(_db).catch((err) => {
+      _initPromise = null;
+      throw err;
+    });
+  }
+  await _initPromise;
+  return _db;
+}
 
-  await run(_db, `CREATE TABLE IF NOT EXISTS users (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+async function initializeSchema(db) {
+  await run(db, `CREATE TABLE IF NOT EXISTS users (
+    id           SERIAL PRIMARY KEY,
     username     TEXT    NOT NULL UNIQUE,
     passwordHash TEXT    NOT NULL,
-    createdAt    INTEGER NOT NULL
+    createdAt    BIGINT  NOT NULL,
+    score        INTEGER NOT NULL DEFAULT 0
   )`);
 
-  await run(_db, `CREATE TABLE IF NOT EXISTS photos (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  await run(db, `CREATE TABLE IF NOT EXISTS photos (
+    id               SERIAL PRIMARY KEY,
     userId           INTEGER REFERENCES users(id),
     clientId         TEXT,
-    createdAt        INTEGER NOT NULL,
+    createdAt        BIGINT  NOT NULL,
     width            INTEGER,
     height           INTEGER,
     type             TEXT    DEFAULT 'image/png',
     location         TEXT,
-    dataUrl          TEXT    NOT NULL,
+    dataUrl          TEXT,
+    photoUrl         TEXT,
+    storagePath      TEXT,
     category         TEXT    NOT NULL DEFAULT 'contribution',
     status           TEXT    NOT NULL DEFAULT 'pending',
     challengePhotoId INTEGER REFERENCES photos(id),
     photoReviewedBy  INTEGER REFERENCES users(id),
-    photoReviewedAt  INTEGER,
-    photoReviewNote  TEXT
+    photoReviewedAt  BIGINT,
+    photoReviewNote  TEXT,
+    floor            INTEGER,
+    weeklySource     INTEGER DEFAULT 0
   )`);
 
   // Defis journaliers : un lieu cible par jour
-  await run(_db, `CREATE TABLE IF NOT EXISTS challenges (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  await run(db, `CREATE TABLE IF NOT EXISTS challenges (
+    id         SERIAL PRIMARY KEY,
     date       TEXT    NOT NULL UNIQUE,
     locationId TEXT    NOT NULL,
-    createdAt  INTEGER NOT NULL
+    createdAt  BIGINT  NOT NULL
   )`);
   // Ligne sentinelle : cible FK stable pour les soumissions du defi de la semaine (challengeId=0)
-  await run(_db, `INSERT OR IGNORE INTO challenges (id, date, locationId, createdAt) VALUES (0, '__weekly__', '__weekly__', 0)`);
+  await run(db, `INSERT INTO challenges (id, date, locationId, createdAt)
+                 VALUES (0, '__weekly__', '__weekly__', 0)
+                 ON CONFLICT (id) DO NOTHING`);
 
   // Challenge requests already seen by each player.
   // Unique (userId, photoId) ensures the same photo is never served twice to a player.
-  await run(_db, `CREATE TABLE IF NOT EXISTS challenge_views (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  await run(db, `CREATE TABLE IF NOT EXISTS challenge_views (
+    id         SERIAL PRIMARY KEY,
     userId     INTEGER NOT NULL REFERENCES users(id),
     photoId    INTEGER NOT NULL REFERENCES photos(id),
     servedDate TEXT    NOT NULL,
-    createdAt  INTEGER NOT NULL,
+    createdAt  BIGINT  NOT NULL,
     UNIQUE(userId, photoId)
   )`);
 
   // Soumissions : photos liees a un defi
-  await run(_db, `CREATE TABLE IF NOT EXISTS submissions (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    challengeId  INTEGER NOT NULL REFERENCES challenges(id),
-    photoId      INTEGER NOT NULL REFERENCES photos(id),
-    clientId     TEXT,
-    playerId     TEXT,
-    userId       INTEGER REFERENCES users(id),
-    reviewStatus TEXT    NOT NULL DEFAULT 'pending',
-    reviewedBy   INTEGER REFERENCES users(id),
-    reviewedAt   INTEGER,
-    reviewNote   TEXT,
-    createdAt    INTEGER NOT NULL
+  await run(db, `CREATE TABLE IF NOT EXISTS submissions (
+    id                SERIAL PRIMARY KEY,
+    challengeId       INTEGER NOT NULL REFERENCES challenges(id),
+    photoId           INTEGER NOT NULL REFERENCES photos(id),
+    clientId          TEXT,
+    playerId          TEXT,
+    userId            INTEGER REFERENCES users(id),
+    reviewStatus      TEXT    NOT NULL DEFAULT 'pending',
+    reviewedBy        INTEGER REFERENCES users(id),
+    reviewedAt        BIGINT,
+    reviewNote        TEXT,
+    createdAt         BIGINT  NOT NULL,
+    weeklyChallengeId INTEGER
   )`);
 
-  // Migrations souples — nouvelles colonnes photos (4-bucket system)
-  try {
-    await run(_db, "ALTER TABLE photos ADD COLUMN category TEXT NOT NULL DEFAULT 'contribution'");
-  } catch {}
-  try {
-    await run(_db, "ALTER TABLE photos ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'");
-  } catch {}
-  try {
-    await run(_db, 'ALTER TABLE photos ADD COLUMN challengePhotoId INTEGER REFERENCES photos(id)');
-  } catch {}
-  try {
-    await run(_db, 'ALTER TABLE photos ADD COLUMN photoReviewedBy INTEGER REFERENCES users(id)');
-  } catch {}
-  try {
-    await run(_db, 'ALTER TABLE photos ADD COLUMN photoReviewedAt INTEGER');
-  } catch {}
-  try {
-    await run(_db, 'ALTER TABLE photos ADD COLUMN photoReviewNote TEXT');
-  } catch {}
-
-  // Migrations souples pour les anciennes bases
-  try {
-    await run(_db, 'ALTER TABLE submissions ADD COLUMN playerId TEXT');
-  } catch {}
-  try {
-    await run(_db, 'ALTER TABLE submissions ADD COLUMN userId INTEGER REFERENCES users(id)');
-  } catch {}
-  try {
-    await run(_db, "ALTER TABLE submissions ADD COLUMN reviewStatus TEXT NOT NULL DEFAULT 'pending'");
-  } catch {}
-  try {
-    await run(_db, 'ALTER TABLE submissions ADD COLUMN reviewedBy INTEGER REFERENCES users(id)');
-  } catch {}
-  try {
-    await run(_db, 'ALTER TABLE submissions ADD COLUMN reviewedAt INTEGER');
-  } catch {}
-  try {
-    await run(_db, 'ALTER TABLE submissions ADD COLUMN reviewNote TEXT');
-  } catch {}
-  try {
-    await run(_db, 'ALTER TABLE photos ADD COLUMN userId INTEGER REFERENCES users(id)');
-  } catch {}
-
   // Reponses des joueurs aux mini-jeux
-  await run(_db, `CREATE TABLE IF NOT EXISTS guesses (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  await run(db, `CREATE TABLE IF NOT EXISTS guesses (
+    id          SERIAL PRIMARY KEY,
     photoId     INTEGER NOT NULL REFERENCES photos(id),
     clientId    TEXT,
     userId      INTEGER REFERENCES users(id),
     type        TEXT    NOT NULL,
     payload     TEXT    NOT NULL,
     score       INTEGER,
-    createdAt   INTEGER NOT NULL
+    createdAt   BIGINT  NOT NULL
   )`);
-  try {
-    await run(_db, 'ALTER TABLE guesses ADD COLUMN userId INTEGER REFERENCES users(id)');
-  } catch {}
 
-  await run(_db, `CREATE TABLE IF NOT EXISTS notifications (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  await run(db, `CREATE TABLE IF NOT EXISTS notifications (
+    id        SERIAL PRIMARY KEY,
     userId    INTEGER NOT NULL REFERENCES users(id),
     type      TEXT    NOT NULL,
     message   TEXT    NOT NULL,
     photoId   INTEGER REFERENCES photos(id),
     read      INTEGER NOT NULL DEFAULT 0,
-    createdAt INTEGER NOT NULL
+    createdAt BIGINT  NOT NULL
   )`);
-
-  try {
-    await run(_db, 'ALTER TABLE notifications ADD COLUMN photoId INTEGER REFERENCES photos(id)');
-  } catch {}
-
-  // Colonne score sur users
-  try {
-    await run(_db, 'ALTER TABLE users ADD COLUMN score INTEGER NOT NULL DEFAULT 0');
-  } catch {}
-
-  // Colonne étage sur photos
-  try {
-    await run(_db, 'ALTER TABLE photos ADD COLUMN floor INTEGER');
-  } catch {}
 
   // Defis de la semaine : un defi actif a la fois (active=1)
-  await run(_db, `CREATE TABLE IF NOT EXISTS weekly_challenges (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    type             TEXT    NOT NULL DEFAULT 'location_only',
-    locationId       TEXT    NOT NULL,
+  await run(db, `CREATE TABLE IF NOT EXISTS weekly_challenges (
+    id               SERIAL PRIMARY KEY,
+    type             TEXT        NOT NULL DEFAULT 'location_only',
+    locationId       TEXT        NOT NULL,
     locationLabel    TEXT,
     referenceDataUrl TEXT,
-    active           INTEGER NOT NULL DEFAULT 0,
-    createdAt        TEXT    NOT NULL DEFAULT (datetime('now'))
+    active           INTEGER     NOT NULL DEFAULT 0,
+    createdAt        TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`);
 
-  // Migrations souples — colonnes defi de la semaine
-  try {
-    await run(_db, 'ALTER TABLE submissions ADD COLUMN weeklyChallengeId INTEGER');
-  } catch {}
-  try {
-    await run(_db, 'ALTER TABLE photos ADD COLUMN weeklySource INTEGER DEFAULT 0');
-  } catch {}
-
-  // Maire de la Salle — periodes actives et archivees
-  await run(_db, `CREATE TABLE IF NOT EXISTS room_mayors (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  // Maire de la Salle - periodes actives et archivees
+  await run(db, `CREATE TABLE IF NOT EXISTS room_mayors (
+    id               SERIAL PRIMARY KEY,
     locationId       TEXT    NOT NULL,
     userId           INTEGER NOT NULL REFERENCES users(id),
-    claimedAt        INTEGER NOT NULL,
-    protectionEndsAt INTEGER NOT NULL,
+    claimedAt        BIGINT  NOT NULL,
+    protectionEndsAt BIGINT  NOT NULL,
     active           INTEGER NOT NULL DEFAULT 1,
-    photoId          INTEGER REFERENCES photos(id)
+    photoId          INTEGER REFERENCES photos(id),
+    adminReviewed    INTEGER NOT NULL DEFAULT 0,
+    renewalDeadline  BIGINT,
+    renewalAllowedAt BIGINT
   )`);
 
   // Temps cumule par joueur par lieu (toutes periodes)
-  await run(_db, `CREATE TABLE IF NOT EXISTS room_mayor_totals (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  await run(db, `CREATE TABLE IF NOT EXISTS room_mayor_totals (
+    id           SERIAL PRIMARY KEY,
     locationId   TEXT    NOT NULL,
     userId       INTEGER NOT NULL REFERENCES users(id),
     totalSeconds INTEGER NOT NULL DEFAULT 0,
@@ -205,46 +170,64 @@ export async function getDb() {
   )`);
 
   // Signalements joueurs sur une periode de maire
-  await run(_db, `CREATE TABLE IF NOT EXISTS room_mayor_reports (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  await run(db, `CREATE TABLE IF NOT EXISTS room_mayor_reports (
+    id          SERIAL PRIMARY KEY,
     mayorId     INTEGER NOT NULL REFERENCES room_mayors(id),
     reportedBy  INTEGER NOT NULL REFERENCES users(id),
-    reportedAt  INTEGER NOT NULL,
+    reportedAt  BIGINT  NOT NULL,
     status      TEXT    NOT NULL DEFAULT 'pending',
     UNIQUE(mayorId, reportedBy)
   )`);
 
-  // Colonne admin review sur room_mayors
-  try {
-    await run(_db, 'ALTER TABLE room_mayors ADD COLUMN adminReviewed INTEGER NOT NULL DEFAULT 0');
-  } catch {}
-  try {
-    await run(_db, 'ALTER TABLE room_mayors ADD COLUMN renewalDeadline INTEGER');
-  } catch {}
-  try {
-    await run(_db, 'ALTER TABLE room_mayors ADD COLUMN renewalAllowedAt INTEGER');
-  } catch {}
-
-  // Positions et noms personnalisés pour les lieux (admin)
-  await run(_db, `CREATE TABLE IF NOT EXISTS location_overrides (
+  // Positions et noms personnalises pour les lieux (admin)
+  await run(db, `CREATE TABLE IF NOT EXISTS location_overrides (
     locationId TEXT PRIMARY KEY,
     label      TEXT,
-    lat        REAL,
-    lng        REAL,
-    updatedAt  INTEGER NOT NULL
+    lat        DOUBLE PRECISION,
+    lng        DOUBLE PRECISION,
+    updatedAt  BIGINT NOT NULL
   )`);
 
-  await ensureDevAccount(_db);
+  // Migrations idempotentes (anciennes schemas)
+  await run(db, "ALTER TABLE photos ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'contribution'");
+  await run(db, "ALTER TABLE photos ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'");
+  await run(db, 'ALTER TABLE photos ADD COLUMN IF NOT EXISTS photoUrl TEXT');
+  await run(db, 'ALTER TABLE photos ADD COLUMN IF NOT EXISTS storagePath TEXT');
+  await run(db, 'ALTER TABLE photos ADD COLUMN IF NOT EXISTS challengePhotoId INTEGER REFERENCES photos(id)');
+  await run(db, 'ALTER TABLE photos ADD COLUMN IF NOT EXISTS photoReviewedBy INTEGER REFERENCES users(id)');
+  await run(db, 'ALTER TABLE photos ADD COLUMN IF NOT EXISTS photoReviewedAt BIGINT');
+  await run(db, 'ALTER TABLE photos ADD COLUMN IF NOT EXISTS photoReviewNote TEXT');
+  await run(db, 'ALTER TABLE photos ADD COLUMN IF NOT EXISTS userId INTEGER REFERENCES users(id)');
+  await run(db, 'ALTER TABLE photos ADD COLUMN IF NOT EXISTS floor INTEGER');
+  await run(db, 'ALTER TABLE photos ADD COLUMN IF NOT EXISTS weeklySource INTEGER DEFAULT 0');
+  await run(db, 'ALTER TABLE photos ALTER COLUMN dataUrl DROP NOT NULL');
 
-  return _db;
+  await run(db, 'ALTER TABLE submissions ADD COLUMN IF NOT EXISTS playerId TEXT');
+  await run(db, 'ALTER TABLE submissions ADD COLUMN IF NOT EXISTS userId INTEGER REFERENCES users(id)');
+  await run(db, "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS reviewStatus TEXT NOT NULL DEFAULT 'pending'");
+  await run(db, 'ALTER TABLE submissions ADD COLUMN IF NOT EXISTS reviewedBy INTEGER REFERENCES users(id)');
+  await run(db, 'ALTER TABLE submissions ADD COLUMN IF NOT EXISTS reviewedAt BIGINT');
+  await run(db, 'ALTER TABLE submissions ADD COLUMN IF NOT EXISTS reviewNote TEXT');
+  await run(db, 'ALTER TABLE submissions ADD COLUMN IF NOT EXISTS weeklyChallengeId INTEGER');
+
+  await run(db, 'ALTER TABLE guesses ADD COLUMN IF NOT EXISTS userId INTEGER REFERENCES users(id)');
+  await run(db, 'ALTER TABLE notifications ADD COLUMN IF NOT EXISTS photoId INTEGER REFERENCES photos(id)');
+
+  await run(db, 'ALTER TABLE users ADD COLUMN IF NOT EXISTS score INTEGER NOT NULL DEFAULT 0');
+
+  await run(db, 'ALTER TABLE room_mayors ADD COLUMN IF NOT EXISTS adminReviewed INTEGER NOT NULL DEFAULT 0');
+  await run(db, 'ALTER TABLE room_mayors ADD COLUMN IF NOT EXISTS renewalDeadline BIGINT');
+  await run(db, 'ALTER TABLE room_mayors ADD COLUMN IF NOT EXISTS renewalAllowedAt BIGINT');
+
+  await ensureDevAccount(db);
 }
 
-// ── Score helpers ─────────────────────────────────────────────────────────────
+// -- Score helpers -------------------------------------------------------------
 
 export async function updateScore(db, userId, delta) {
   if (!userId || !delta) return;
   await run(db,
-    'UPDATE users SET score = MAX(0, score + ?) WHERE id = ?',
+    'UPDATE users SET score = GREATEST(0, score + $1) WHERE id = $2',
     [delta, userId]
   );
 }
@@ -252,32 +235,142 @@ export async function updateScore(db, userId, delta) {
 async function ensureDevAccount(db) {
   const username = 'dev';
   const passwordHash = await hashPassword('12345678');
-  const rows = await all(db, 'SELECT id FROM users WHERE username = ?', [username]);
+  const rows = await all(db, 'SELECT id FROM users WHERE username = $1', [username]);
   if (rows.length === 0) {
     await run(
       db,
-      'INSERT INTO users (username, passwordHash, createdAt) VALUES (?, ?, ?)',
+      'INSERT INTO users (username, passwordHash, createdAt) VALUES ($1, $2, $3)',
       [username, passwordHash, Date.now()]
     );
     return;
   }
-  await run(db, 'UPDATE users SET passwordHash = ? WHERE username = ?', [passwordHash, username]);
+  await run(db, 'UPDATE users SET passwordHash = $1 WHERE username = $2', [passwordHash, username]);
 }
 
-export function run(db, sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) reject(err);
-      else resolve({ lastID: this.lastID, changes: this.changes });
-    });
+function convertQMarksToPgPlaceholders(sql) {
+  let index = 0;
+  return sql.replace(/\?/g, () => {
+    index += 1;
+    return `$${index}`;
   });
 }
 
-export function all(db, sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows);
-    });
-  });
+function normalizeQuery(sql, params) {
+  const normalizedSql = sql.includes('?') ? convertQMarksToPgPlaceholders(sql) : sql;
+  return {
+    sql: normalizedSql,
+    params,
+  };
+}
+
+const LEGACY_CAMEL_CASE_FIELDS = [
+  'adminReviewed',
+  'challengeDataUrl',
+  'challengeFloor',
+  'challengeId',
+  'challengeLocation',
+  'challengeLocationId',
+  'challengePhotoId',
+  'challengeSubmitterUsername',
+  'clientId',
+  'createdAt',
+  'locationId',
+  'locationLabel',
+  'mayorId',
+  'mayorUserId',
+  'mayorUsername',
+  'passwordHash',
+  'photoDataUrl',
+  'photoId',
+  'photoReviewedAt',
+  'photoReviewedBy',
+  'photoReviewNote',
+  'photoUrl',
+  'playerId',
+  'protectionEndsAt',
+  'referenceDataUrl',
+  'renewalAllowedAt',
+  'renewalDeadline',
+  'reportedAt',
+  'reportedBy',
+  'reviewedAt',
+  'reviewedBy',
+  'reviewedByUsername',
+  'reviewNote',
+  'reviewStatus',
+  'servedDate',
+  'submitterUserId',
+  'submitterUsername',
+  'storagePath',
+  'totalSeconds',
+  'updatedAt',
+  'userId',
+  'weeklySource',
+  'weeklyChallengeId',
+];
+
+const DEFAULT_CASE_MAP = new Map(
+  LEGACY_CAMEL_CASE_FIELDS.map((field) => [field.toLowerCase(), field])
+);
+
+function extractAliasCaseMap(sql) {
+  const aliasMap = new Map();
+  const aliasRegex = /\bAS\s+"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi;
+  let match = aliasRegex.exec(sql);
+  while (match) {
+    const alias = match[1];
+    aliasMap.set(alias.toLowerCase(), alias);
+    match = aliasRegex.exec(sql);
+  }
+  return aliasMap;
+}
+
+function remapRowKeyCasing(sql, row) {
+  if (!row || typeof row !== 'object') return row;
+
+  const aliasMap = extractAliasCaseMap(sql);
+  const remapped = {};
+
+  for (const [key, value] of Object.entries(row)) {
+    const targetKey = aliasMap.get(key) || DEFAULT_CASE_MAP.get(key) || key;
+    remapped[targetKey] = value;
+  }
+
+  return remapped;
+}
+
+function withInsertReturningId(sql) {
+  if (!/^\s*insert\b/i.test(sql)) return { sql, appended: false };
+  if (/\breturning\b/i.test(sql)) return { sql, appended: false };
+  return { sql: `${sql} RETURNING id`, appended: true };
+}
+
+export async function run(db, sql, params = []) {
+  const normalized = normalizeQuery(sql, params);
+  const maybeReturning = withInsertReturningId(normalized.sql);
+
+  try {
+    const result = await db.query(maybeReturning.sql, normalized.params);
+    return {
+      lastID: result.rows?.[0]?.id ?? null,
+      changes: result.rowCount ?? 0,
+    };
+  } catch (err) {
+    // Some inserts target tables where PK isn't named "id" (e.g. location_overrides).
+    // Retry once without auto RETURNING id.
+    if (maybeReturning.appended && err?.code === '42703') {
+      const result = await db.query(normalized.sql, normalized.params);
+      return {
+        lastID: result.rows?.[0]?.id ?? null,
+        changes: result.rowCount ?? 0,
+      };
+    }
+    throw err;
+  }
+}
+
+export async function all(db, sql, params = []) {
+  const normalized = normalizeQuery(sql, params);
+  const result = await db.query(normalized.sql, normalized.params);
+  return result.rows.map((row) => remapRowKeyCasing(normalized.sql, row));
 }

@@ -2,11 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import session from 'express-session';
 import { createServer as createHttpServer } from 'http';
 import { createServer as createHttpsServer } from 'https';
 import { WebSocketServer } from 'ws';
+import { createClient } from '@supabase/supabase-js';
 import { getDb, run, all, updateScore } from './db.js';
 import {
   hashPassword,
@@ -28,6 +30,9 @@ const CORS_ORIGINS = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || '')
   .map((value) => value.trim())
   .filter(Boolean);
 const useHttps = process.env.DEV_HTTPS === '1' || process.env.DEV_HTTPS === 'true';
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const SUPABASE_STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'photos';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -60,6 +65,67 @@ function requireDevAccess(req, res, next) {
     return;
   }
   next();
+}
+
+let _supabaseAdmin = null;
+
+function getSupabaseAdmin() {
+  if (_supabaseAdmin) return _supabaseAdmin;
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. Storage upload is not configured.');
+  }
+  _supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  return _supabaseAdmin;
+}
+
+function parseDataUrl(dataUrl) {
+  if (typeof dataUrl !== 'string') return null;
+  const match = /^data:([^;]+);base64,(.+)$/s.exec(dataUrl);
+  if (!match) return null;
+  return { mimeType: match[1], base64: match[2] };
+}
+
+function getPhotoExtension(mimeType = 'image/png') {
+  const map = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'image/heic': 'heic',
+    'image/heif': 'heif',
+  };
+  return map[mimeType.toLowerCase()] ?? 'bin';
+}
+
+async function uploadPhotoToStorage(dataUrl, { userId, category = 'photo', createdAt = Date.now() } = {}) {
+  const parsed = parseDataUrl(dataUrl);
+  if (!parsed) {
+    throw new Error('Invalid image payload. Expected a base64 data URL.');
+  }
+
+  const fileBuffer = Buffer.from(parsed.base64, 'base64');
+  const extension = getPhotoExtension(parsed.mimeType);
+  const path = `${category}/${String(userId ?? 'anon')}/${createdAt}-${randomUUID()}.${extension}`;
+  const supabase = getSupabaseAdmin();
+
+  const { error } = await supabase.storage
+    .from(SUPABASE_STORAGE_BUCKET)
+    .upload(path, fileBuffer, {
+      contentType: parsed.mimeType,
+      upsert: false,
+      cacheControl: '31536000',
+    });
+  if (error) throw new Error(`Storage upload failed: ${error.message}`);
+
+  const { data } = supabase.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(path);
+  const photoUrl = data?.publicUrl ?? null;
+  if (!photoUrl) {
+    throw new Error('Storage upload succeeded but public URL could not be resolved.');
+  }
+  return { photoUrl, storagePath: path };
 }
 
 // ---- AUTH ----
@@ -170,7 +236,7 @@ app.get('/api/admin/submissions', requireAuth, requireDevAccess, async (_req, re
         p.height,
         p.type,
         p.location,
-        p.dataUrl,
+        COALESCE(p.photoUrl, p.dataUrl) AS dataUrl,
         u.username AS submitterUsername,
         reviewer.username AS reviewedByUsername
       FROM submissions s
@@ -261,6 +327,7 @@ app.get('/api/photos', async (_req, res) => {
     const photos = await all(db, 'SELECT * FROM photos ORDER BY createdAt DESC');
     res.json(photos.map(p => ({
       ...p,
+      dataUrl: p.photoUrl ?? p.dataUrl ?? null,
       location: p.location ? JSON.parse(p.location) : null
     })));
   } catch (err) {
@@ -275,10 +342,15 @@ app.post('/api/photos', requireAuth, async (req, res) => {
     return;
   }
   try {
+    const upload = await uploadPhotoToStorage(dataUrl, {
+      userId: req.user.id,
+      category: 'contribution',
+      createdAt,
+    });
     const db = await getDb();
     const result = await run(db,
-      `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, category, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'contribution', 'pending')`,
+      `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, photoUrl, storagePath, category, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'contribution', 'pending')`,
       [
         req.user.id,
         clientId ?? null,
@@ -287,7 +359,9 @@ app.post('/api/photos', requireAuth, async (req, res) => {
         height ?? null,
         type ?? 'image/png',
         location ? JSON.stringify(location) : null,
-        dataUrl
+        null,
+        upload.photoUrl,
+        upload.storagePath
       ]
     );
     const record = {
@@ -299,7 +373,8 @@ app.post('/api/photos', requireAuth, async (req, res) => {
       height: height ?? null,
       type: type ?? 'image/png',
       location: location ?? null,
-      dataUrl
+      dataUrl: upload.photoUrl,
+      photoUrl: upload.photoUrl
     };
     broadcast({ type: 'photo-added', photo: record });
     res.json({ id: record.id });
@@ -323,12 +398,17 @@ app.post('/api/photos/contribute', requireAuth, async (req, res) => {
   }
   const floorVal = Number.isInteger(floor) ? floor : (floor != null ? parseInt(floor, 10) : null);
   try {
+    const upload = await uploadPhotoToStorage(dataUrl, {
+      userId: req.user.id,
+      category: 'contribution',
+      createdAt,
+    });
     const db = await getDb();
     const result = await run(db,
-      `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, category, status, floor)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'contribution', 'pending', ?)`,
+      `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, photoUrl, storagePath, category, status, floor)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'contribution', 'pending', ?)`,
       [req.user.id, clientId ?? null, createdAt, width ?? null, height ?? null,
-       type ?? 'image/png', JSON.stringify(location), dataUrl, floorVal ?? null]
+       type ?? 'image/png', JSON.stringify(location), null, upload.photoUrl, upload.storagePath, floorVal ?? null]
     );
     const photoId = result.lastID;
     res.json({ id: photoId });
@@ -362,12 +442,17 @@ app.post('/api/photos/respond', requireAuth, async (req, res) => {
       res.status(400).json({ error: 'Invalid or unavailable challenge photo.' });
       return;
     }
+    const upload = await uploadPhotoToStorage(dataUrl, {
+      userId: req.user.id,
+      category: 'response',
+      createdAt,
+    });
     const floorVal = Number.isInteger(floor) ? floor : (floor != null ? parseInt(floor, 10) : null);
     const result = await run(db,
-      `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, category, status, challengePhotoId, floor)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'response', 'pending', ?, ?)`,
+      `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, photoUrl, storagePath, category, status, challengePhotoId, floor)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'response', 'pending', ?, ?)`,
       [req.user.id, clientId ?? null, createdAt, width ?? null, height ?? null,
-       type ?? 'image/png', JSON.stringify(location), dataUrl, Number(challengePhotoId), floorVal ?? null]
+       type ?? 'image/png', JSON.stringify(location), null, upload.photoUrl, upload.storagePath, Number(challengePhotoId), floorVal ?? null]
     );
     const responsePhotoId = result.lastID;
     const challengeOwnerId = Number(challengePhoto.userId);
@@ -418,16 +503,16 @@ app.get('/api/admin/photos', requireAuth, requireDevAccess, async (req, res) => 
     return;
   }
   const { category, statuses } = bucketMap[bucket];
-  const placeholders = statuses.map(() => '?').join(', ');
+  const placeholders = statuses.map((_, index) => `$${index + 2}`).join(', ');
   try {
     const db = await getDb();
     const rows = await all(db,
       `SELECT p.id, p.userId, p.clientId, p.createdAt, p.width, p.height, p.type,
-              p.location, p.dataUrl, p.category, p.status, p.challengePhotoId,
+              p.location, COALESCE(p.photoUrl, p.dataUrl) AS dataUrl, p.category, p.status, p.challengePhotoId,
               p.photoReviewedBy, p.photoReviewedAt, p.photoReviewNote, p.floor,
 
               u.username  AS submitterUsername,
-              cp.dataUrl  AS challengeDataUrl,
+              COALESCE(cp.photoUrl, cp.dataUrl) AS challengeDataUrl,
               cp.location AS challengeLocation,
               cp.floor    AS challengeFloor,
               cpu.username AS challengeSubmitterUsername
@@ -435,7 +520,7 @@ app.get('/api/admin/photos', requireAuth, requireDevAccess, async (req, res) => 
        LEFT JOIN users u   ON u.id   = p.userId
        LEFT JOIN photos cp ON cp.id  = p.challengePhotoId
        LEFT JOIN users cpu ON cpu.id = cp.userId
-       WHERE p.category = ? AND p.status IN (${placeholders})
+       WHERE p.category = $1 AND p.status IN (${placeholders})
        ORDER BY p.createdAt DESC`,
       [category, ...statuses]
     );
@@ -685,7 +770,7 @@ app.post('/api/challenge/:id/submit', requireAuth, async (req, res) => {
     }
 
     const existing = await all(db,
-      'SELECT COUNT(*) as count FROM submissions WHERE challengeId = ? AND userId = ?',
+      'SELECT COUNT(*)::int as count FROM submissions WHERE challengeId = $1 AND userId = $2',
       [challengeId, req.user.id]
     );
     if ((existing[0]?.count ?? 0) >= GAME_SETTINGS.maxPhotosPerDay) {
@@ -790,7 +875,7 @@ app.get('/api/room-mayors', async (_req, res) => {
       const mayor = (await all(db,
         `SELECT rm.id AS mayorId, rm.userId, rm.protectionEndsAt,
                 rm.renewalDeadline, rm.renewalAllowedAt,
-                u.username, p.dataUrl AS photoDataUrl
+                u.username, COALESCE(p.photoUrl, p.dataUrl) AS photoDataUrl
          FROM room_mayors rm
          JOIN users u ON u.id = rm.userId
          LEFT JOIN photos p ON p.id = rm.photoId
@@ -801,7 +886,7 @@ app.get('/api/room-mayors', async (_req, res) => {
       let pendingReports = 0;
       if (mayor) {
         const rep = (await all(db,
-          `SELECT COUNT(*) AS cnt FROM room_mayor_reports WHERE mayorId = ? AND status = 'pending'`,
+          `SELECT COUNT(*)::int AS cnt FROM room_mayor_reports WHERE mayorId = $1 AND status = 'pending'`,
           [mayor.mayorId]
         ))[0];
         pendingReports = rep?.cnt ?? 0;
@@ -945,12 +1030,17 @@ app.post('/api/room-mayors/claim', requireAuth, async (req, res) => {
         'UPDATE room_mayors SET protectionEndsAt = ?, renewalDeadline = ?, renewalAllowedAt = ? WHERE id = ?',
         [nowSeconds + ROOM_MAYOR_PROTECTION_SECONDS, newRenewalDeadline, newRenewalAllowedAt, activeMayor.id]
       );
+      const upload = await uploadPhotoToStorage(dataUrl, {
+        userId: req.user.id,
+        category: 'mayor',
+        createdAt: createdAt ?? Date.now(),
+      });
       const photoResult = await run(db,
-        `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, category, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'contribution', 'pending')`,
+        `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, photoUrl, storagePath, category, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'contribution', 'pending')`,
         [req.user.id, clientId ?? null, createdAt ?? Date.now(),
          width ?? null, height ?? null, type ?? 'image/png',
-         JSON.stringify(location), dataUrl]
+         JSON.stringify(location), null, upload.photoUrl, upload.storagePath]
       );
       // Mettre à jour la photo associée au maire
       await run(db, 'UPDATE room_mayors SET photoId = ? WHERE id = ?', [photoResult.lastID, activeMayor.id]);
@@ -981,12 +1071,17 @@ app.post('/api/room-mayors/claim', requireAuth, async (req, res) => {
       );
     }
 
+    const upload = await uploadPhotoToStorage(dataUrl, {
+      userId: req.user.id,
+      category: 'mayor',
+      createdAt: createdAt ?? Date.now(),
+    });
     const photoResult = await run(db,
-      `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, category, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'contribution', 'pending')`,
+      `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, photoUrl, storagePath, category, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'contribution', 'pending')`,
       [req.user.id, clientId ?? null, createdAt ?? Date.now(),
        width ?? null, height ?? null, type ?? 'image/png',
-       JSON.stringify(location), dataUrl]
+       JSON.stringify(location), null, upload.photoUrl, upload.storagePath]
     );
     const photoId = photoResult.lastID;
     const renewalDeadline  = nowSeconds + ROOM_MAYOR_RENEWAL_DEADLINE_SECONDS;
@@ -1064,7 +1159,7 @@ app.get('/api/admin/room-mayors/pending', requireAuth, requireDevAccess, async (
     const db = await getDb();
     const rows = await all(db,
       `SELECT rm.id AS mayorId, rm.locationId, rm.claimedAt, rm.protectionEndsAt,
-              u.username, p.dataUrl AS photoDataUrl, p.location AS photoLocation
+              u.username, COALESCE(p.photoUrl, p.dataUrl) AS photoDataUrl, p.location AS photoLocation
        FROM room_mayors rm
        JOIN users u ON u.id = rm.userId
        LEFT JOIN photos p ON p.id = rm.photoId
@@ -1085,7 +1180,7 @@ app.get('/api/admin/room-mayors/all-history', requireAuth, requireDevAccess, asy
     const db = await getDb();
     const rows = await all(db,
       `SELECT rm.id AS mayorId, rm.locationId, rm.claimedAt, rm.active, rm.adminReviewed,
-              u.username, p.dataUrl AS photoDataUrl
+              u.username, COALESCE(p.photoUrl, p.dataUrl) AS photoDataUrl
        FROM room_mayors rm
        JOIN users u ON u.id = rm.userId
        LEFT JOIN photos p ON p.id = rm.photoId
@@ -1122,7 +1217,7 @@ app.get('/api/admin/room-mayors/reports', requireAuth, requireDevAccess, async (
               rm.locationId, rm.active AS mayorActive,
               u_mayor.username AS mayorUsername,
               u_reporter.username AS reporterUsername,
-              p.dataUrl AS photoDataUrl
+              COALESCE(p.photoUrl, p.dataUrl) AS photoDataUrl
        FROM room_mayor_reports rmr
        JOIN room_mayors rm ON rm.id = rmr.mayorId
        JOIN users u_mayor ON u_mayor.id = rm.userId
@@ -1192,7 +1287,7 @@ app.post('/api/admin/room-mayors/reports/:reportId/review', requireAuth, require
       await run(db, `UPDATE room_mayor_reports SET status = 'resolved_rejected' WHERE id = ?`, [reportId]);
       await run(db,
         `INSERT INTO room_mayor_totals (locationId, userId, totalSeconds) VALUES (?, ?, 0)
-         ON CONFLICT(locationId, userId) DO UPDATE SET totalSeconds = MAX(0, totalSeconds - 1800)`,
+         ON CONFLICT(locationId, userId) DO UPDATE SET totalSeconds = GREATEST(0, totalSeconds - 1800)`,
         [report.locationId, report.reportedBy]
       );
       await run(db,
@@ -1264,7 +1359,7 @@ app.get('/api/minigames/feed', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
     const photos = await all(db,
-      `SELECT p.id, p.dataUrl, p.createdAt, p.location, u.username AS submitterUsername
+      `SELECT p.id, COALESCE(p.photoUrl, p.dataUrl) AS dataUrl, p.createdAt, p.location, u.username AS submitterUsername
        FROM photos p
        LEFT JOIN users u ON u.id = p.userId
        WHERE p.category = 'contribution'
@@ -1353,7 +1448,7 @@ async function pickChallengePhotoForUser(db, userId) {
   // Bucket 2: contributions valid?es, pas prises par ce joueur, pas d?j? vues
   const rows = await all(
     db,
-    `SELECT p.id, p.dataUrl
+    `SELECT p.id, COALESCE(p.photoUrl, p.dataUrl) AS dataUrl
      FROM photos p
      WHERE p.category = 'contribution'
        AND p.status   = 'validated'
@@ -1530,8 +1625,8 @@ app.get('/api/me/score', requireAuth, async (req, res) => {
     const db = await getDb();
     const row = (await all(db,
       `SELECT score,
-         (SELECT COUNT(*) + 1 FROM users u2 WHERE u2.score > u.score) AS rank
-       FROM users u WHERE u.id = ?`,
+         (SELECT COUNT(*)::int + 1 FROM users u2 WHERE u2.score > u.score) AS rank
+       FROM users u WHERE u.id = $1`,
       [req.user.id]
     ))[0];
     if (!row) {

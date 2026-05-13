@@ -20,12 +20,13 @@
     "vite": "^6.0.0"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.49.8",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "express-session": "^1.18.2",
     "leaflet": "^1.9.4",
-    "sqlite3": "^6.0.1",
+    "pg": "^8.13.1",
     "ws": "^8.17.1"
   }
 }
