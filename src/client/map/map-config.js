@@ -1,15 +1,10 @@
 // Configuration de la carte — campus EPFL.
 // Utilise le serveur WMTS interne EPFL (plan intérieur avec étages).
-// Le XML des capabilities est embarqué statiquement dans le projet
-// (voir epflCapabilitiesXml ci-dessous) et parsé au démarrage via ogcWmts.js.
 
-// ---------------------------------------------------------------------------
-// XML des capabilities WMTS de l'EPFL.
-// À remplacer par le contenu réel de :
-//   https://<wmts-server-epfl>/service/wmts?SERVICE=WMTS&REQUEST=GetCapabilities
-// ---------------------------------------------------------------------------
-export const epflCapabilitiesXml = `
-<?xml version="1.0" encoding="UTF-8"?>
+// XML des capabilities WMTS embarqué statiquement.
+// IMPORTANT : la déclaration <?xml doit être en toute première position,
+// sans espace ni saut de ligne avant elle — DOMParser est strict là-dessus.
+export const epflCapabilitiesXml = `<?xml version="1.0" encoding="UTF-8"?>
 <Capabilities version="1.0.0" xmlns="http://www.opengis.net/wmts/1.0" xmlns:ows="http://www.opengis.net/ows/1.1"
               xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
               xmlns:gml="http://www.opengis.net/gml"
@@ -1034,7 +1029,7 @@ export const epflCapabilitiesXml = `
     
   </Contents>
 </Capabilities>
-`
+`;
 
 export const mapConfig = {
   // Centre du campus EPFL (Rolex Learning Center)
@@ -1042,19 +1037,17 @@ export const mapConfig = {
 
   // Zoom initial : 17 = vue campus complet, 19 = détail bâtiment
   initialZoom: 17,
-  minZoom: 16,   // En dessous : trop dézoomé, sort du campus
-  maxZoom: 19,   // Maximum supporté par le WMTS EPFL
+  minZoom: 16,
+  maxZoom: 19,
 
-  // Attribution requise pour le service EPFL
   attribution: '© <a href="https://www.epfl.ch">EPFL</a>',
 
-  // Limite de panoramique : empêche de sortir de la zone EPFL/Ecublens
   maxBounds: [
     [46.514899, 6.559748], // Sud-Ouest
     [46.525309, 6.575161]  // Nord-Est
   ],
-  maxBoundsViscosity: 0.9, // 1 = frontière rigide, 0 = libre
+  maxBoundsViscosity: 0.9,
 
-  // Étage affiché au démarrage (0 = rez-de-chaussée, 99 = vue extérieure)
+  // 99 = vue extérieure/toits, 0 = rez-de-chaussée
   defaultFloor: 99,
 };
