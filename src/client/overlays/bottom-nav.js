@@ -35,7 +35,7 @@ export function createBottomNav({
   // ── Groupe d'icônes ───────────────────────────────────────────────────────
   const iconGroup = document.createElement('div');
   iconGroup.style.cssText = `
-    position:fixed; left:14px; bottom:32px; z-index:1100;
+    position:fixed; left:14px; bottom:64px; z-index:1100;
     display:flex; flex-direction:row; gap:8px; align-items:center;
   `;
   container.appendChild(iconGroup);
