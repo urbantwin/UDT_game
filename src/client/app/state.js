@@ -16,7 +16,8 @@ export const state = {
     id: null,
     name: null,
     score: 0,
-    rank: null
+    rank: null,
+    teamId: null
   },
 
   // Événement de jeu actif (null = pas d'event en cours)

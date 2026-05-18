@@ -38,7 +38,7 @@ async function dataUrlToBlob(dataUrl) {
   return await res.blob();
 }
 
-export function createPhotoSync({ onRemotePhoto } = {}) {
+export function createPhotoSync({ onRemotePhoto, onCtfUpdate } = {}) {
   const apiBase = getApiBase();
   const wsUrl = getWsUrl();
   let socket = null;
@@ -119,6 +119,8 @@ export function createPhotoSync({ onRemotePhoto } = {}) {
         const message = JSON.parse(event.data);
         if (message.type === 'photo-added') {
           await ingestRemotePhoto(message.photo);
+        } else if (message.type === 'ctf_update') {
+          onCtfUpdate?.();
         }
       } catch (error) {
         console.warn('Photo sync message error:', error);

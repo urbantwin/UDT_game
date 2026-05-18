@@ -1,4 +1,4 @@
-// Compact auth display (top-right): shows 👤 : username only.
+// Compact auth display (top-right): shows 👤 : username + team color dot.
 // Login/register/logout are handled by settings-overlay.
 
 export function createAuthOverlay({ container = document.body } = {}) {
@@ -16,6 +16,13 @@ export function createAuthOverlay({ container = document.body } = {}) {
   icon.textContent = '👤';
   root.appendChild(icon);
 
+  const teamDot = document.createElement('span');
+  teamDot.style.cssText = `
+    display:none; width:10px; height:10px; border-radius:50%;
+    flex-shrink:0; border:1.5px solid rgba(0,0,0,0.15);
+  `;
+  root.appendChild(teamDot);
+
   const label = document.createElement('span');
   label.textContent = ': Non connecté';
   label.style.color = 'black';
@@ -23,18 +30,23 @@ export function createAuthOverlay({ container = document.body } = {}) {
 
   container.appendChild(root);
 
-  let currentUser = null;
-
   function setUser(user) {
-    currentUser = user ?? null;
-    label.textContent = currentUser?.username
-      ? `: ${currentUser.username}`
-      : ': Non connecté';
+    label.textContent = user?.username ? `: ${user.username}` : ': Non connecté';
+    if (!user) teamDot.style.display = 'none';
+  }
+
+  function setTeamColor(color) {
+    if (color) {
+      teamDot.style.background = color;
+      teamDot.style.display = 'inline-block';
+    } else {
+      teamDot.style.display = 'none';
+    }
   }
 
   function remove() {
     root.remove();
   }
 
-  return { setUser, remove };
+  return { setUser, setTeamColor, remove };
 }

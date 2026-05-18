@@ -10,12 +10,17 @@ import { createCameraController } from '../camera/camera-controller.js';
 import { createGalleryView } from '../gallery/gallery-view.js';
 import { createAdminGalleryView } from '../gallery/admin-gallery-view.js';
 import { createRoomPinsLayer } from '../overlays/room-pins-layer.js';
+import { createTeamSelectOverlay } from '../overlays/team-select-overlay.js';
+import { createLandingOverlay } from '../overlays/landing-overlay.js';
 import { startGeolocation } from '../services/geolocation.js';
 import { getAllPhotos } from '../services/photo-store.js';
 import { createPhotoSync } from '../services/photo-sync.js';
-import { requestChallengePhoto, acceptChallenge, contributePhoto, respondToChallenge, claimRoom, getRoomMayors } from '../services/challenge-api.js';
+import { requestChallengePhoto, acceptChallenge, contributePhoto, respondToChallenge, claimRoom } from '../services/challenge-api.js';
+import { getCtfRooms, getTeams } from '../services/ctf-api.js';
+import { EPFL_LOCATIONS } from '../../../game/epfl-locations.js';
 import { createWeeklyChallengeOverlay } from '../overlays/weekly-challenge-overlay.js';
 import { createMinigamesOverlay } from '../overlays/minigames-overlay.js';
+import { createCtfLeaderboardOverlay } from '../overlays/ctf-leaderboard-overlay.js';
 import { restoreSession } from '../services/auth-api.js';
 import { createNotificationScheduler } from '../services/notification-scheduler.js';
 import { createNotificationsOverlay } from '../overlays/notifications-overlay.js';
@@ -67,6 +72,52 @@ export function bootstrapApp() {
   let pendingRoomClaimLocationId = null;
   let gameMode = 'guessr'; // 'guessr' | 'king'
 
+  // Colors matching teams table seed data
+  const TEAM_COLORS = { rouge: '#e74c3c', bleu: '#3498db', vert: '#2ecc71' };
+
+  // Previous CTF state for lost-room detection
+  let prevCtfRooms = [];
+
+  const teamSelectOverlay = createTeamSelectOverlay({
+    onTeamSelected: (team) => {
+      state.player.teamId = team.id;
+    },
+  });
+
+  const landingOverlay = createLandingOverlay({
+    onUserLoaded: (user) => {
+      applyUser(user);
+    },
+    onLogout: () => {
+      applyUser(null);
+      if (gameMode === 'king') switchMode('guessr');
+    },
+    onGameChosen: (mode, user) => {
+      if (user && !user.teamId && mode === 'king') {
+        getTeams()
+          .then(teams => teamSelectOverlay.show(teams, { onAfterSelect: () => switchMode('king') }))
+          .catch(() => switchMode('king'));
+      } else {
+        switchMode(mode);
+      }
+    },
+  });
+
+  let ctfPollInterval = null;
+
+  function startCtfPolling() {
+    if (ctfPollInterval) return;
+    ctfPollInterval = setInterval(async () => {
+      if (gameMode !== 'king' || !roomPinsLayer.isVisible()) return;
+      try {
+        const rooms = await getCtfRooms();
+        handleCtfRooms(rooms);
+      } catch {
+        // silent — polling failure should not disrupt gameplay
+      }
+    }, 10_000);
+  }
+
   // ── Scheduler ────────────────────────────────────────────────────────────
   const scheduler = createNotificationScheduler({
     scheduledTimes: [{ hour: 15, minute: 20 }],
@@ -104,11 +155,51 @@ export function bootstrapApp() {
   });
 
   // ── Room pins (King mode) ─────────────────────────────────────────────────
-  const roomPinsLayer = createRoomPinsLayer(mapView.map, {
+  const roomPinsLayer = createRoomPinsLayer(mapView, {
     onPinClick: (locationId) => {
-      kingOverlay.openAtLocation(locationId);
+      const loc = EPFL_LOCATIONS.find(l => l.id === locationId);
+      const screenPos = loc ? mapView.geoToScreen(loc.lat, loc.lng) : null;
+      kingOverlay.openAtLocation(locationId, screenPos);
     },
   });
+
+  // ── Apply authenticated user to all UI modules ────────────────────────────
+  function applyUser(user) {
+    state.player.id     = user?.id       ?? null;
+    state.player.name   = user?.username ?? null;
+    state.player.teamId = user?.teamId   ?? null;
+    const teamColor = user?.teamId ? (TEAM_COLORS[user.teamId] ?? null) : null;
+    authOverlay.setUser(user);
+    authOverlay.setTeamColor(teamColor);
+    bottomNav?.setUser(user?.username ?? null, teamColor);
+    settingsOverlay?.setUser(user);
+    const isDev = user?.username === 'dev';
+    adminGalleryView.setVisible(isDev);
+    bottomNav.setAdminVisible(isDev);
+    bottomNav.setLoggedIn(Boolean(user));
+    if (isDev) adminGalleryView.refresh();
+    notificationsOverlay.setLoggedIn(Boolean(user));
+    mayorTimerOverlay.setLoggedIn(Boolean(user));
+  }
+
+  // ── CTF room update (detection pertes + compteur + carte) ─────────────────
+  function handleCtfRooms(rooms) {
+    const teamId = state.player.teamId;
+    if (teamId && prevCtfRooms.length > 0) {
+      for (const prev of prevCtfRooms) {
+        if (prev.controllingTeam === teamId) {
+          const now = rooms.find(r => r.locationId === prev.locationId);
+          if (now && now.controllingTeam !== teamId) {
+            showToast(`Salle perdue : ${prev.locationLabel || prev.locationId} !`, { color: '#ef4444', duration: 6000 });
+          }
+        }
+      }
+    }
+    prevCtfRooms = rooms;
+    const controlled = teamId ? rooms.filter(r => r.controllingTeam === teamId).length : null;
+    bottomNav?.setRoomCount(controlled, rooms.length);
+    roomPinsLayer.show(rooms);
+  }
 
   // ── Mode switcher ─────────────────────────────────────────────────────────
   async function switchMode(mode) {
@@ -120,11 +211,12 @@ export function bootstrapApp() {
       challengeOverlay.closePanel?.();
       minigamesOverlay.closePanel();
       try {
-        const mayors = await getRoomMayors();
-        roomPinsLayer.show(mayors, locationOverrides);
+        const rooms = await getCtfRooms();
+        handleCtfRooms(rooms);
       } catch {
-        roomPinsLayer.show([], locationOverrides);
+        handleCtfRooms([]);
       }
+      startCtfPolling();
     } else {
       kingOverlay.closePanel();
       roomPinsLayer.hide();
@@ -134,16 +226,7 @@ export function bootstrapApp() {
   // ── Settings overlay ──────────────────────────────────────────────────────
   settingsOverlay = createSettingsOverlay({
     onAuthChange: (user) => {
-      state.player.id   = user?.id       ?? null;
-      state.player.name = user?.username ?? null;
-      authOverlay.setUser(user);
-      const isDev = user?.username === 'dev';
-      adminGalleryView.setVisible(isDev);
-      bottomNav.setAdminVisible(isDev);
-      bottomNav.setLoggedIn(Boolean(user));
-      if (isDev) adminGalleryView.refresh();
-      notificationsOverlay.setLoggedIn(Boolean(user));
-      mayorTimerOverlay.setLoggedIn(Boolean(user));
+      applyUser(user);
       if (!user && gameMode === 'king') switchMode('guessr');
     },
     onOpenGallery: () => galleryView.open(),
@@ -151,6 +234,7 @@ export function bootstrapApp() {
     onDisableNotifs: () => {},
     onTestNotif: () => scheduler.testFire(),
     onOpenNotifications: () => notificationsOverlay.toggle(),
+    onSwitchMode: () => switchMode(gameMode === 'king' ? 'guessr' : 'king'),
   });
 
   timeOverlay.onSettingsClick(() => settingsOverlay.toggle());
@@ -160,6 +244,16 @@ export function bootstrapApp() {
     onRemotePhoto: (photo) => {
       photoMarkersLayer.addPhoto(photo);
       galleryView.addPhoto(photo);
+    },
+    onCtfUpdate: async () => {
+      if (gameMode === 'king' && roomPinsLayer.isVisible()) {
+        try {
+          const rooms = await getCtfRooms();
+          handleCtfRooms(rooms);
+        } catch {
+          // silent
+        }
+      }
     },
   });
 
@@ -180,15 +274,17 @@ export function bootstrapApp() {
         pendingRoomClaimLocationId = null;
         try {
           await claimRoom({ locationId: locId, photo });
-          showToast('👑 Salle revendiquée ! Le chrono est lancé.', { color: '#6366f1' });
+          // Also submit the photo as a CTF contribution for this room
+          contributePhoto(photo, { locationId: locId }).catch(() => {});
+          showToast('Salle revendiquee ! Le chrono est lance.', { color: '#6366f1' });
           mayorTimerOverlay.refresh();
           if (roomPinsLayer.isVisible()) {
-            const mayors = await getRoomMayors();
-            roomPinsLayer.show(mayors, locationOverrides);
+            const rooms = await getCtfRooms();
+            handleCtfRooms(rooms);
           }
         } catch (err) {
-          showToast(err.message || 'Revendication échouée.', { color: '#ef4444' });
-          console.warn('[room-mayor] Claim échoué:', err.message);
+          showToast(err.message || 'Revendication echouee.', { color: '#ef4444' });
+          console.warn('[room-mayor] Claim echoue:', err.message);
         }
       } else {
         try { await contributePhoto(photo); }
@@ -201,30 +297,26 @@ export function bootstrapApp() {
   });
 
   // ── Bottom nav ────────────────────────────────────────────────────────────
+  const ctfLeaderboardOverlay = createCtfLeaderboardOverlay();
+
   const bottomNav = createBottomNav({
-    onCamera:        () => cameraController.open(),
-    onChallenge:     () => challengeOverlay.openPanel(),
-    onSwitchMode:    (newMode) => switchMode(newMode),
-    onOpenRoomList:  () => kingOverlay.openPanel(),
-    onAdmin:         () => adminGalleryView.togglePanel(),
+    onCamera:          () => cameraController.open(),
+    onChallenge:       () => challengeOverlay.openPanel(),
+    onAdmin:           () => adminGalleryView.togglePanel(),
+    onOpenLeaderboard: () => ctfLeaderboardOverlay.toggle(),
   });
 
-  // ── Restore session ───────────────────────────────────────────────────────
+  // ── Landing + session restore ─────────────────────────────────────────────
+  landingOverlay.show('loading');
   restoreSession()
     .then((user) => {
-      state.player.id   = user?.id       ?? null;
-      state.player.name = user?.username ?? null;
-      authOverlay.setUser(user);
-      settingsOverlay.setUser(user);
-      const isDev = user?.username === 'dev';
-      adminGalleryView.setVisible(isDev);
-      bottomNav.setAdminVisible(isDev);
-      bottomNav.setLoggedIn(Boolean(user));
-      if (isDev) adminGalleryView.refresh();
-      notificationsOverlay.setLoggedIn(Boolean(user));
-      mayorTimerOverlay.setLoggedIn(Boolean(user));
+      applyUser(user);
+      landingOverlay.show(user); // null → login form, user → game choice
     })
-    .catch((err) => console.warn('Failed to restore session:', err));
+    .catch((err) => {
+      console.warn('Failed to restore session:', err);
+      landingOverlay.show(null);
+    });
 
   // ── Photos locales ────────────────────────────────────────────────────────
   getAllPhotos()
@@ -250,6 +342,7 @@ export function bootstrapApp() {
 
   return function teardown() {
     stopGeolocation();
+    if (ctfPollInterval) clearInterval(ctfPollInterval);
     scheduler.remove();
     userLocationLayer.remove();
     photoMarkersLayer.remove();
@@ -267,6 +360,9 @@ export function bootstrapApp() {
     notificationsOverlay.remove();
     mayorTimerOverlay.remove();
     bottomNav.remove();
+    teamSelectOverlay.remove();
+    landingOverlay.remove();
+    ctfLeaderboardOverlay.remove();
     mapView.map.remove();
   };
 }

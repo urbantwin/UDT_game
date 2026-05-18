@@ -58,8 +58,8 @@ export async function register({ username, password }) {
   return await postAuth('/api/auth/register', { username, password });
 }
 
-export async function login({ username, password }) {
-  return await postAuth('/api/auth/login', { username, password });
+export async function login({ username, password, rememberMe = false }) {
+  return await postAuth('/api/auth/login', { username, password, rememberMe });
 }
 
 export async function logout() {
