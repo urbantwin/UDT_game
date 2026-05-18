@@ -219,6 +219,37 @@ async function initializeSchema(db) {
   await run(db, 'ALTER TABLE room_mayors ADD COLUMN IF NOT EXISTS renewalDeadline BIGINT');
   await run(db, 'ALTER TABLE room_mayors ADD COLUMN IF NOT EXISTS renewalAllowedAt BIGINT');
 
+  // CTF tables
+  await run(db, `CREATE TABLE IF NOT EXISTS teams (
+    id    TEXT PRIMARY KEY,
+    name  TEXT NOT NULL,
+    color TEXT NOT NULL
+  )`);
+  await run(db, `INSERT INTO teams (id, name, color) VALUES ('rouge', 'Rouge', '#e74c3c') ON CONFLICT (id) DO NOTHING`);
+  await run(db, `INSERT INTO teams (id, name, color) VALUES ('bleu', 'Bleu', '#3498db') ON CONFLICT (id) DO NOTHING`);
+  await run(db, `INSERT INTO teams (id, name, color) VALUES ('vert', 'Vert', '#2ecc71') ON CONFLICT (id) DO NOTHING`);
+
+  await run(db, `CREATE TABLE IF NOT EXISTS ctf_team_scores (
+    id         SERIAL  PRIMARY KEY,
+    teamId     TEXT    NOT NULL REFERENCES teams(id),
+    points     INTEGER NOT NULL,
+    reason     TEXT    NOT NULL,
+    locationId TEXT,
+    awardedAt  BIGINT  NOT NULL
+  )`);
+
+  await run(db, 'ALTER TABLE users ADD COLUMN IF NOT EXISTS teamId TEXT REFERENCES teams(id)');
+  await run(db, 'ALTER TABLE photos ADD COLUMN IF NOT EXISTS locationId TEXT');
+
+  await run(db, `CREATE TABLE IF NOT EXISTS ctf_player_scores (
+    id         SERIAL  PRIMARY KEY,
+    userId     INTEGER NOT NULL REFERENCES users(id),
+    points     INTEGER NOT NULL,
+    reason     TEXT    NOT NULL,
+    locationId TEXT,
+    awardedAt  BIGINT  NOT NULL
+  )`);
+
   await ensureDevAccount(db);
 }
 
@@ -265,6 +296,7 @@ function normalizeQuery(sql, params) {
 
 const LEGACY_CAMEL_CASE_FIELDS = [
   'adminReviewed',
+  'awardedAt',
   'challengeDataUrl',
   'challengeFloor',
   'challengeId',
@@ -305,6 +337,7 @@ const LEGACY_CAMEL_CASE_FIELDS = [
   'totalSeconds',
   'updatedAt',
   'userId',
+  'teamId',
   'weeklySource',
   'weeklyChallengeId',
 ];

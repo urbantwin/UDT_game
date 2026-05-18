@@ -32,11 +32,11 @@ export const DAILY_SCHEDULE = [
 // ─────────────────────────────────────────────
 export const LOCATION_BY_WEEKDAY = {
   0: 'random',
-  1: 'rolex',          // Lundi   → Rolex Learning Center
-  2: 'bc',             // Mardi   → Bibliothèque BC
-  3: 'esplanade',      // Mercredi→ Esplanade
-  4: 'ce',             // Jeudi   → Bâtiment CE
-  5: 'sat',            // Vendredi→ SATtélite
+  1: 'cm_1_1',         // Lundi    → CM 1 1
+  2: 'arcadie',        // Mardi    → Arcadie
+  3: 'gr_b0_01',       // Mercredi → GR B0 01
+  4: 'ce_1_1',         // Jeudi    → CE 1 1
+  5: 'piano',          // Vendredi → Piano
   6: 'random',
 };
 
@@ -162,3 +162,13 @@ export const CHALLENGE_WINDOW = {
 export const ROOM_MAYOR_PROTECTION_SECONDS      =   300; // 5 min — protection initiale après claim
 export const ROOM_MAYOR_RENEWAL_DEADLINE_SECONDS = 54000; // 15 h  — délai max avant perte de la salle
 export const ROOM_MAYOR_RENEWAL_COOLDOWN_SECONDS = 14400; // 4 h   — délai min entre deux renouvellements
+
+// ─────────────────────────────────────────────
+// 10. SCORING KING OF CAMPUS (points équipe)
+// ─────────────────────────────────────────────
+export const CTF_SCORING = {
+  pointsPerRoomPerHour: 1,   // points par salle contrôlée par heure
+  dominationBonus:      3,   // bonus à l'équipe qui contrôle le plus de salles
+  bonusWindowPoints:    3,   // bonus à 19h et minuit
+  fraudPenalty:        -10,  // malus équipe si photo de revendication refusée par l'admin
+};

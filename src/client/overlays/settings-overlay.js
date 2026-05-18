@@ -20,6 +20,7 @@ export function createSettingsOverlay({
   onDisableNotifs,
   onTestNotif,
   onOpenNotifications,
+  onSwitchMode,
 } = {}) {
   const panel = document.createElement('div');
   panel.style.cssText = `
@@ -199,26 +200,25 @@ export function createSettingsOverlay({
   lastRoomEl.textContent = 'Connectez-vous pour voir votre statut.';
   kingSection.appendChild(lastRoomEl);
 
-  const kingLbTitle = document.createElement('div');
-  kingLbTitle.textContent = '📍 Classement par salle';
-  kingLbTitle.style.cssText = 'font-weight:600; font-size:11px; margin-top:4px;';
-  kingSection.appendChild(kingLbTitle);
+  const myRoomsTitle = document.createElement('div');
+  myRoomsTitle.textContent = '⏱ Mes salles actives';
+  myRoomsTitle.style.cssText = 'font-weight:600; font-size:11px; margin-top:4px;';
+  kingSection.appendChild(myRoomsTitle);
 
-  const locationSelect = document.createElement('select');
-  locationSelect.style.cssText = `
-    width:100%; padding:4px 6px; border-radius:5px; border:none;
-    font:11px system-ui,sans-serif; background:#1f2937; color:#fff;
-    cursor:pointer; box-sizing:border-box; margin-top:2px;
-  `;
-  kingSection.appendChild(locationSelect);
+  const myRoomsEl = document.createElement('div');
+  myRoomsEl.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
+  kingSection.appendChild(myRoomsEl);
 
-  const kingLbEl = document.createElement('div');
-  kingLbEl.style.cssText = `
-    display:flex; flex-direction:column; gap:2px;
-    background:rgba(0,0,0,0.3); border-radius:6px; padding:4px;
-    max-height:140px; overflow-y:auto;
-  `;
-  kingSection.appendChild(kingLbEl);
+  kingSection.appendChild(makeDivider());
+
+  const switchModeBtn = makeBtn('🎮 Changer de jeu', 'rgba(99,102,241,0.7)');
+  switchModeBtn.style.color = '#fff';
+  switchModeBtn.style.width = '100%';
+  switchModeBtn.addEventListener('click', () => {
+    close();
+    onSwitchMode?.();
+  });
+  kingSection.appendChild(switchModeBtn);
 
   panel.appendChild(kingSection);
 
@@ -280,6 +280,63 @@ export function createSettingsOverlay({
 
   // ── King stats ────────────────────────────────────────────────────────────
   let mayorData = [];
+  let kingTickId = null;
+
+  function formatCountdown(unixSec) {
+    const remaining = unixSec - Math.floor(Date.now() / 1000);
+    if (remaining <= 0) return null;
+    const h = Math.floor(remaining / 3600);
+    const m = Math.floor((remaining % 3600) / 60);
+    const s = remaining % 60;
+    if (h > 0) return `${h}h ${String(m).padStart(2,'0')}min`;
+    if (m > 0) return `${m}min ${String(s).padStart(2,'0')}s`;
+    return `${s}s`;
+  }
+
+  function tickKingCountdowns() {
+    const nowSec = Math.floor(Date.now() / 1000);
+    for (const el of panel.querySelectorAll('[data-king-deadline]')) {
+      const endsAt = Number(el.dataset.kingDeadline);
+      const txt = formatCountdown(endsAt);
+      const urgent = endsAt - nowSec < 3600;
+      el.textContent = txt ? `⏰ Renouveler avant : ${txt}` : '⚠️ Délai dépassé !';
+      el.style.color = urgent ? '#ef4444' : '#fbbf24';
+    }
+  }
+
+  function renderMyActiveRooms(rooms) {
+    myRoomsEl.innerHTML = '';
+    const nowSec = Math.floor(Date.now() / 1000);
+    const myRooms = rooms.filter(loc => loc.mayor?.userId === currentUser?.id);
+    if (myRooms.length === 0) {
+      const none = document.createElement('div');
+      none.textContent = 'Aucune salle revendiquée.';
+      none.style.cssText = 'font-size:11px; opacity:0.55; padding:2px 0;';
+      myRoomsEl.appendChild(none);
+      return;
+    }
+    for (const loc of myRooms) {
+      const row = document.createElement('div');
+      row.style.cssText = `
+        background:rgba(255,255,255,0.07); border-radius:6px;
+        padding:5px 8px; display:flex; flex-direction:column; gap:2px;
+      `;
+      const nameEl = document.createElement('div');
+      nameEl.textContent = `👑 ${loc.locationLabel}`;
+      nameEl.style.cssText = 'font:600 11px system-ui; color:#34d399;';
+      row.appendChild(nameEl);
+      if (loc.mayor?.renewalDeadline) {
+        const deadlineEl = document.createElement('div');
+        deadlineEl.dataset.kingDeadline = String(loc.mayor.renewalDeadline);
+        const txt = formatCountdown(loc.mayor.renewalDeadline);
+        const urgent = loc.mayor.renewalDeadline - nowSec < 3600;
+        deadlineEl.textContent = txt ? `⏰ Renouveler avant : ${txt}` : '⚠️ Délai dépassé !';
+        deadlineEl.style.cssText = `font:10px system-ui; color:${urgent ? '#ef4444' : '#fbbf24'};`;
+        row.appendChild(deadlineEl);
+      }
+      myRoomsEl.appendChild(row);
+    }
+  }
 
   function formatTotalTime(seconds) {
     const h = Math.floor(seconds / 3600);
@@ -290,36 +347,9 @@ export function createSettingsOverlay({
     return `${s}s`;
   }
 
-  function renderKingLeaderboard() {
-    const selectedId = locationSelect.value;
-    const loc = mayorData.find(l => l.locationId === selectedId);
-    kingLbEl.innerHTML = '';
-    if (!loc || !loc.leaderboard?.length) {
-      const empty = document.createElement('div');
-      empty.textContent = 'Aucun joueur.';
-      empty.style.cssText = 'opacity:0.6; font:11px system-ui,sans-serif; padding:4px;';
-      kingLbEl.appendChild(empty);
-      return;
-    }
-    loc.leaderboard.forEach((entry, i) => {
-      const row = document.createElement('div');
-      const isMe = currentUser && entry.username === currentUser.username;
-      row.style.cssText = `
-        display:flex; justify-content:space-between; align-items:center;
-        padding:3px 6px; border-radius:4px; font-size:11px;
-        background:${isMe ? 'rgba(96,165,250,0.2)' : 'transparent'};
-      `;
-      const medal = i === 0 ? '👑' : `${i + 1}.`;
-      row.innerHTML = `<span>${medal} ${entry.username}</span><span style="font-weight:600">${formatTotalTime(entry.totalSeconds)}</span>`;
-      kingLbEl.appendChild(row);
-    });
-  }
-
   async function loadKingScore() {
     if (!currentUser) {
       lastRoomEl.textContent = 'Connectez-vous pour voir votre statut.';
-      kingLbEl.innerHTML = '';
-      locationSelect.innerHTML = '';
       mayorData = [];
       return;
     }
@@ -327,13 +357,6 @@ export function createSettingsOverlay({
     try {
       const [stats, mayors] = await Promise.all([getMyKingStats(), getRoomMayors()]);
       mayorData = mayors;
-      locationSelect.innerHTML = '';
-      mayors.forEach(loc => {
-        const opt = document.createElement('option');
-        opt.value = loc.locationId;
-        opt.textContent = loc.locationLabel;
-        locationSelect.appendChild(opt);
-      });
       if (!stats.lastRoom) {
         lastRoomEl.textContent = 'Aucune salle revendiquée encore.';
       } else {
@@ -357,15 +380,13 @@ export function createSettingsOverlay({
           `<div style="font-size:13px;">${icon} <b>${r.locationLabel}</b></div>` +
           `<div style="opacity:0.75;font-size:11px;">${r.isMayor ? 'Vous êtes maire' : 'Plus maire'}${rankStr ? ' · ' + rankStr : ''} · ${formatTotalTime(r.myTotalSeconds)}</div>` +
           deadlineHtml;
-        locationSelect.value = r.locationId;
       }
-      renderKingLeaderboard();
+      renderMyActiveRooms(mayors);
     } catch {
       lastRoomEl.textContent = 'Erreur de chargement.';
     }
   }
 
-  locationSelect.addEventListener('change', renderKingLeaderboard);
   refreshKingBtn.addEventListener('click', loadKingScore);
 
   toggleLbBtn.addEventListener('click', async () => {
@@ -492,6 +513,9 @@ export function createSettingsOverlay({
     } else {
       isOpen = true;
       panel.style.display = 'flex';
+      if (gameMode === 'king') {
+        kingTickId = setInterval(tickKingCountdowns, 1000);
+      }
       // Register outside-click listener on next tick so the current click
       // (on the ⚙️ button) doesn't immediately re-close the panel.
       setTimeout(() => {
@@ -512,6 +536,7 @@ export function createSettingsOverlay({
     panel.style.display = 'none';
     removeOutsideHandler?.();
     removeOutsideHandler = null;
+    if (kingTickId) { clearInterval(kingTickId); kingTickId = null; }
   }
 
   function setUser(user) {

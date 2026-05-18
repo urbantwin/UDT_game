@@ -43,7 +43,7 @@ export function createMayorTimerOverlay({ container = document.body } = {}) {
     roomLabel   = label;
     baseSeconds = totalSeconds;
     startTime   = Date.now();
-    el.style.display = 'block';
+    // Widget caché — les chrono par salle sont dans le menu réglages
     tick();
     tickId = setInterval(tick, 1000);
   }

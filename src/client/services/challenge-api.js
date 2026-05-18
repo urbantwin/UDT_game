@@ -35,10 +35,11 @@ async function buildPhotoPayload(photo) {
 
 // ── CONTRIBUTION (Bucket 1) ────────────────────────────────────────────────
 // Soumet une photo comme contribution au pool du jeu.
-// Exige une localisation GPS active.
-export async function contributePhoto(photo) {
+// locationId: identifiant de salle EPFL optionnel (active le cooldown de 1h CTF).
+export async function contributePhoto(photo, { locationId = null } = {}) {
   const payload = await buildPhotoPayload(photo);
   if (!payload.location) throw new Error('GPS requis pour contribuer une photo.');
+  if (locationId) payload.locationId = locationId;
   const res = await fetch(`${getApiBase()}/api/photos/contribute`, {
     method: 'POST',
     credentials: 'include',
@@ -46,7 +47,7 @@ export async function contributePhoto(photo) {
     body: JSON.stringify(payload),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || 'Échec de la contribution.');
+  if (!res.ok) throw new Error(data?.error || 'Echec de la contribution.');
   return data; // { id }
 }
 

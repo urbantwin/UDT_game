@@ -320,10 +320,29 @@ export function createWeeklyChallengeOverlay({
     countdownIntervalId = null;
   }
 
-  async function openAtLocation(locationId) {
+  async function openAtLocation(locationId, screenPos) {
     currentUserId = state.player?.id ?? null;
     listEl.innerHTML = '';
     statusEl.textContent = 'Chargement…';
+
+    // Position above the clicked room — fall back to bottom-left if no coords
+    if (screenPos) {
+      const panelWidth = 300;
+      const margin = 8;
+      const left = Math.max(margin, Math.min(
+        screenPos.x - panelWidth / 2,
+        window.innerWidth - panelWidth - margin
+      ));
+      const bottom = Math.max(margin, window.innerHeight - screenPos.y + 20);
+      root.style.left = `${left}px`;
+      root.style.bottom = `${bottom}px`;
+      root.style.top = 'auto';
+    } else {
+      root.style.left = '20px';
+      root.style.bottom = '100px';
+      root.style.top = 'auto';
+    }
+
     root.style.display = 'flex';
     clearInterval(countdownIntervalId);
     try {

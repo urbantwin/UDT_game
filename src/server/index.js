@@ -2,14 +2,12 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import session from 'express-session';
 import connectPg from 'connect-pg-simple';
 import { createServer as createHttpServer } from 'http';
 import { createServer as createHttpsServer } from 'https';
 import { WebSocketServer } from 'ws';
-import { createClient } from '@supabase/supabase-js';
 import { getDb, run, all, updateScore } from './db.js';
 import {
   hashPassword,
@@ -19,8 +17,16 @@ import {
   destroyUserSession,
   getSessionConfig
 } from './auth.js';
-import { CHALLENGE_WINDOW, GAME_SETTINGS, SUBMISSION_WINDOW, getTodayLocation, ROOM_MAYOR_PROTECTION_SECONDS, ROOM_MAYOR_RENEWAL_DEADLINE_SECONDS, ROOM_MAYOR_RENEWAL_COOLDOWN_SECONDS, MINIGAMES } from '../../game/game-config.js';
+import {
+  requireDevAccess,
+  safeJsonParse,
+  haversineMeters,
+  uploadPhotoToStorage,
+} from './utils.js';
+import { CHALLENGE_WINDOW, GAME_SETTINGS, SUBMISSION_WINDOW, getTodayLocation, MINIGAMES } from '../../game/game-config.js';
 import { getLocationById, EPFL_LOCATIONS } from '../../game/epfl-locations.js';
+import createRoomMayorsRouter from './routes/room-mayors.js';
+import ctfRouter, { startCtfCron } from './routes/ctf.js';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-only-change-me';
@@ -31,9 +37,6 @@ const CORS_ORIGINS = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || '')
   .map((value) => value.trim())
   .filter(Boolean);
 const useHttps = process.env.DEV_HTTPS === '1' || process.env.DEV_HTTPS === 'true';
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const SUPABASE_STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'photos';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -69,75 +72,6 @@ app.use(session({
 }));
 app.use(express.json({ limit: '15mb' }));
 
-function requireDevAccess(req, res, next) {
-  if (req.user?.username !== 'dev') {
-    res.status(403).json({ error: 'Admin access denied.' });
-    return;
-  }
-  next();
-}
-
-let _supabaseAdmin = null;
-
-function getSupabaseAdmin() {
-  if (_supabaseAdmin) return _supabaseAdmin;
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. Storage upload is not configured.');
-  }
-  _supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  return _supabaseAdmin;
-}
-
-function parseDataUrl(dataUrl) {
-  if (typeof dataUrl !== 'string') return null;
-  const match = /^data:([^;]+);base64,(.+)$/s.exec(dataUrl);
-  if (!match) return null;
-  return { mimeType: match[1], base64: match[2] };
-}
-
-function getPhotoExtension(mimeType = 'image/png') {
-  const map = {
-    'image/jpeg': 'jpg',
-    'image/jpg': 'jpg',
-    'image/png': 'png',
-    'image/webp': 'webp',
-    'image/gif': 'gif',
-    'image/heic': 'heic',
-    'image/heif': 'heif',
-  };
-  return map[mimeType.toLowerCase()] ?? 'bin';
-}
-
-async function uploadPhotoToStorage(dataUrl, { userId, category = 'photo', createdAt = Date.now() } = {}) {
-  const parsed = parseDataUrl(dataUrl);
-  if (!parsed) {
-    throw new Error('Invalid image payload. Expected a base64 data URL.');
-  }
-
-  const fileBuffer = Buffer.from(parsed.base64, 'base64');
-  const extension = getPhotoExtension(parsed.mimeType);
-  const path = `${category}/${String(userId ?? 'anon')}/${createdAt}-${randomUUID()}.${extension}`;
-  const supabase = getSupabaseAdmin();
-
-  const { error } = await supabase.storage
-    .from(SUPABASE_STORAGE_BUCKET)
-    .upload(path, fileBuffer, {
-      contentType: parsed.mimeType,
-      upsert: false,
-      cacheControl: '31536000',
-    });
-  if (error) throw new Error(`Storage upload failed: ${error.message}`);
-
-  const { data } = supabase.storage.from(SUPABASE_STORAGE_BUCKET).getPublicUrl(path);
-  const photoUrl = data?.publicUrl ?? null;
-  if (!photoUrl) {
-    throw new Error('Storage upload succeeded but public URL could not be resolved.');
-  }
-  return { photoUrl, storagePath: path };
-}
-
 // ---- AUTH ----
 app.post('/api/auth/register', async (req, res) => {
   const { username, password } = req.body || {};
@@ -171,14 +105,14 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 app.post('/api/auth/login', async (req, res) => {
-  const { username, password } = req.body || {};
+  const { username, password, rememberMe } = req.body || {};
   if (typeof username !== 'string' || typeof password !== 'string') {
     res.status(400).json({ error: 'Missing credentials.' });
     return;
   }
   try {
     const db = await getDb();
-    const user = (await all(db, 'SELECT id, username, passwordHash FROM users WHERE username = ?', [username.trim().toLowerCase()]))[0];
+    const user = (await all(db, 'SELECT id, username, passwordHash, teamId FROM users WHERE username = ?', [username.trim().toLowerCase()]))[0];
     if (!user) {
       res.status(401).json({ error: 'Invalid credentials.' });
       return;
@@ -188,8 +122,9 @@ app.post('/api/auth/login', async (req, res) => {
       res.status(401).json({ error: 'Invalid credentials.' });
       return;
     }
-    const publicUser = { id: user.id, username: user.username };
+    const publicUser = { id: user.id, username: user.username, teamId: user.teamId ?? null };
     await createUserSession(req, publicUser);
+    if (rememberMe) req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
     res.json({ user: publicUser, session: getSessionConfig() });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -199,7 +134,7 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/auth/me', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
-    const user = (await all(db, 'SELECT id, username, createdAt FROM users WHERE id = ?', [req.user.id]))[0];
+    const user = (await all(db, 'SELECT id, username, createdAt, teamId FROM users WHERE id = ?', [req.user.id]))[0];
     if (!user) {
       res.status(404).json({ error: 'User not found.' });
       return;
@@ -395,9 +330,9 @@ app.post('/api/photos', requireAuth, async (req, res) => {
 
 // -- BUCKET ROUTES ----------------------------------------------------------
 
-// POST /api/photos/contribute  ? Bucket 1 (contribution en attente validation)
+// POST /api/photos/contribute  — Bucket 1 (contribution en attente validation)
 app.post('/api/photos/contribute', requireAuth, async (req, res) => {
-  const { clientId, createdAt, width, height, type, location, dataUrl, floor } = req.body || {};
+  const { clientId, createdAt, width, height, type, location, dataUrl, floor, locationId } = req.body || {};
   if (!dataUrl || !createdAt) {
     res.status(400).json({ error: 'Missing photo payload.' });
     return;
@@ -406,19 +341,45 @@ app.post('/api/photos/contribute', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'Location required to contribute a photo.' });
     return;
   }
+
+  // Validate locationId when provided
+  if (locationId != null) {
+    const knownLoc = EPFL_LOCATIONS.find(l => l.id === locationId);
+    if (!knownLoc) {
+      res.status(400).json({ error: 'locationId inconnu.' });
+      return;
+    }
+  }
+
   const floorVal = Number.isInteger(floor) ? floor : (floor != null ? parseInt(floor, 10) : null);
   try {
+    const db = await getDb();
+
+    // 1h cooldown per (user, locationId)
+    if (locationId != null) {
+      const cooldownCutoff = Date.now() - 3600000;
+      const recent = (await all(db,
+        `SELECT MAX(createdAt) AS lastAt FROM photos
+         WHERE userId = $1 AND locationId = $2 AND createdAt > $3`,
+        [req.user.id, locationId, cooldownCutoff]
+      ))[0];
+      if (recent?.lastAt != null) {
+        const minsLeft = Math.ceil((Number(recent.lastAt) + 3600000 - Date.now()) / 60000);
+        res.status(429).json({ error: `Tu as deja soumis une photo pour cette salle. Reessaie dans ${minsLeft} minute(s).` });
+        return;
+      }
+    }
+
     const upload = await uploadPhotoToStorage(dataUrl, {
       userId: req.user.id,
       category: 'contribution',
       createdAt,
     });
-    const db = await getDb();
     const result = await run(db,
-      `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, photoUrl, storagePath, category, status, floor)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'contribution', 'pending', ?)`,
+      `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, photoUrl, storagePath, category, status, floor, locationId)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'contribution', 'pending', ?, ?)`,
       [req.user.id, clientId ?? null, createdAt, width ?? null, height ?? null,
-       type ?? 'image/png', JSON.stringify(location), null, upload.photoUrl, upload.storagePath, floorVal ?? null]
+       type ?? 'image/png', JSON.stringify(location), null, upload.photoUrl, upload.storagePath, floorVal ?? null, locationId ?? null]
     );
     const photoId = result.lastID;
     res.json({ id: photoId });
@@ -798,570 +759,6 @@ app.post('/api/challenge/:id/submit', requireAuth, async (req, res) => {
   }
 });
 
-// -- MAIRE DE LA SALLE ----------------------------------------
-
-// Expire les salles dont le délai de renouvellement (15h) est dépassé
-async function expireDeadlinedMayors(db) {
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const expired = await all(db,
-    `SELECT id, locationId, userId, claimedAt FROM room_mayors
-     WHERE active = 1 AND renewalDeadline IS NOT NULL AND renewalDeadline < ?`,
-    [nowSeconds]
-  );
-  for (const m of expired) {
-    await run(db, 'UPDATE room_mayors SET active = 0 WHERE id = ?', [m.id]);
-    const elapsed = nowSeconds - m.claimedAt;
-    await run(db,
-      `INSERT INTO room_mayor_totals (locationId, userId, totalSeconds) VALUES (?, ?, ?)
-       ON CONFLICT(locationId, userId) DO UPDATE SET totalSeconds = totalSeconds + excluded.totalSeconds`,
-      [m.locationId, m.userId, elapsed]
-    );
-    const locLabel = EPFL_LOCATIONS.find(l => l.id === m.locationId)?.label ?? m.locationId;
-    await run(db,
-      'INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)',
-      [m.userId, 'mayor_expired',
-       `⏰ Tu as perdu le titre de maire de "${locLabel}" — photo non renouvelée dans les 15h. La salle est redevenue libre.`,
-       Date.now()]
-    );
-  }
-}
-
-// Helper : charge les labels personnalisés et retourne une fonction getLabel(locationId)
-async function buildLabelResolver(db) {
-  const rows = await all(db, 'SELECT locationId, label FROM location_overrides', []);
-  const map = new Map(rows.map(r => [r.locationId, r.label]));
-  return (id) => map.get(id) ?? EPFL_LOCATIONS.find(l => l.id === id)?.label ?? id;
-}
-
-// GET /api/locations/overrides — positions et noms personnalisés (public)
-app.get('/api/locations/overrides', async (_req, res) => {
-  try {
-    const db = await getDb();
-    const rows = await all(db, 'SELECT locationId, label, lat, lng FROM location_overrides', []);
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/admin/locations/:locationId — modifier position et/ou nom d'un lieu
-app.post('/api/admin/locations/:locationId', requireAuth, requireDevAccess, async (req, res) => {
-  const { locationId } = req.params;
-  const loc = EPFL_LOCATIONS.find(l => l.id === locationId);
-  if (!loc) { res.status(400).json({ error: 'locationId inconnu.' }); return; }
-  const { label, lat, lng } = req.body || {};
-  if (!label && lat == null && lng == null) {
-    res.status(400).json({ error: 'Au moins un champ (label, lat, lng) est requis.' });
-    return;
-  }
-  try {
-    const db = await getDb();
-    const existing = (await all(db,
-      'SELECT label, lat, lng FROM location_overrides WHERE locationId = ?',
-      [locationId]
-    ))[0];
-    const newLabel = label ?? existing?.label ?? loc.label;
-    const newLat   = lat   ?? existing?.lat   ?? loc.lat;
-    const newLng   = lng   ?? existing?.lng   ?? loc.lng;
-    await run(db,
-      `INSERT INTO location_overrides (locationId, label, lat, lng, updatedAt)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(locationId) DO UPDATE SET label=excluded.label, lat=excluded.lat, lng=excluded.lng, updatedAt=excluded.updatedAt`,
-      [locationId, newLabel, newLat, newLng, Date.now()]
-    );
-    res.json({ locationId, label: newLabel, lat: newLat, lng: newLng });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/room-mayors — liste tous les lieux avec leur maire actuel et le classement
-app.get('/api/room-mayors', async (_req, res) => {
-  try {
-    const db = await getDb();
-    await expireDeadlinedMayors(db);
-    const getLabel = await buildLabelResolver(db);
-    const results = await Promise.all(EPFL_LOCATIONS.map(async (loc) => {
-      const mayor = (await all(db,
-        `SELECT rm.id AS mayorId, rm.userId, rm.protectionEndsAt,
-                rm.renewalDeadline, rm.renewalAllowedAt,
-                u.username, COALESCE(p.photoUrl, p.dataUrl) AS photoDataUrl
-         FROM room_mayors rm
-         JOIN users u ON u.id = rm.userId
-         LEFT JOIN photos p ON p.id = rm.photoId
-         WHERE rm.locationId = ? AND rm.active = 1 LIMIT 1`,
-        [loc.id]
-      ))[0] ?? null;
-
-      let pendingReports = 0;
-      if (mayor) {
-        const rep = (await all(db,
-          `SELECT COUNT(*)::int AS cnt FROM room_mayor_reports WHERE mayorId = $1 AND status = 'pending'`,
-          [mayor.mayorId]
-        ))[0];
-        pendingReports = rep?.cnt ?? 0;
-      }
-
-      const leaderboard = await all(db,
-        `SELECT rmt.userId, rmt.totalSeconds, u.username
-         FROM room_mayor_totals rmt JOIN users u ON u.id = rmt.userId
-         WHERE rmt.locationId = ? ORDER BY rmt.totalSeconds DESC LIMIT 3`,
-        [loc.id]
-      );
-
-      return {
-        locationId: loc.id,
-        locationLabel: getLabel(loc.id),
-        mayor: mayor ? {
-          userId: mayor.userId,
-          username: mayor.username,
-          mayorId: mayor.mayorId,
-          photoDataUrl: mayor.photoDataUrl ?? null,
-          pendingReports,
-          renewalDeadline: mayor.renewalDeadline ?? null,
-          renewalAllowedAt: mayor.renewalAllowedAt ?? null,
-        } : null,
-        protectionEndsAt: mayor ? mayor.protectionEndsAt : null,
-        leaderboard,
-      };
-    }));
-    res.json(results);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/me/king-stats — chrono + rang de la dernière salle revendiquée
-app.get('/api/me/king-stats', requireAuth, async (req, res) => {
-  try {
-    const db = await getDb();
-    const nowSeconds = Math.floor(Date.now() / 1000);
-
-    const lastMayor = (await all(db,
-      `SELECT rm.locationId, rm.claimedAt
-       FROM room_mayors rm WHERE rm.userId = ?
-       ORDER BY rm.claimedAt DESC LIMIT 1`,
-      [req.user.id]
-    ))[0];
-
-    if (!lastMayor) return res.json({ lastRoom: null });
-
-    const getLabel = await buildLabelResolver(db);
-    const loc = EPFL_LOCATIONS.find(l => l.id === lastMayor.locationId);
-
-    const activeMayor = (await all(db,
-      'SELECT userId, claimedAt, renewalDeadline, renewalAllowedAt FROM room_mayors WHERE locationId = ? AND active = 1 LIMIT 1',
-      [lastMayor.locationId]
-    ))[0];
-    const isMayor = activeMayor?.userId === req.user.id;
-
-    const totalRecord = (await all(db,
-      'SELECT totalSeconds FROM room_mayor_totals WHERE locationId = ? AND userId = ?',
-      [lastMayor.locationId, req.user.id]
-    ))[0];
-    let myTotalSeconds = totalRecord?.totalSeconds ?? 0;
-    if (isMayor && activeMayor?.claimedAt) {
-      myTotalSeconds += nowSeconds - activeMayor.claimedAt;
-    }
-
-    const allTotals = await all(db,
-      'SELECT userId FROM room_mayor_totals WHERE locationId = ? ORDER BY totalSeconds DESC',
-      [lastMayor.locationId]
-    );
-    const rank = allTotals.findIndex(r => r.userId === req.user.id) + 1;
-
-    res.json({
-      lastRoom: {
-        locationId: lastMayor.locationId,
-        locationLabel: getLabel(lastMayor.locationId),
-        myTotalSeconds,
-        myRank: rank > 0 ? rank : null,
-        isMayor,
-        totalPlayers: allTotals.length,
-        renewalDeadline:  isMayor ? (activeMayor?.renewalDeadline ?? null)  : null,
-        renewalAllowedAt: isMayor ? (activeMayor?.renewalAllowedAt ?? null) : null,
-      },
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/room-mayors/claim — revendiquer un lieu (GPS <= 25m obligatoire)
-app.post('/api/room-mayors/claim', requireAuth, async (req, res) => {
-  const { locationId, dataUrl, location, width, height, type, createdAt, clientId, floor } = req.body || {};
-  if (!locationId || !dataUrl || !location) {
-    res.status(400).json({ error: 'locationId, dataUrl et location sont requis.' });
-    return;
-  }
-  const epflLoc = EPFL_LOCATIONS.find(l => l.id === locationId);
-  if (!epflLoc) {
-    res.status(400).json({ error: 'locationId inconnu.' });
-    return;
-  }
-  const playerLat = location?.lat;
-  const playerLon = location?.lon ?? location?.lng;
-  if (!Number.isFinite(playerLat) || !Number.isFinite(playerLon)) {
-    res.status(400).json({ error: 'Coordonnées GPS invalides.' });
-    return;
-  }
-  const isAdmin = req.user.username === 'dev';
-  if (!isAdmin) {
-    const dist = haversineMeters(epflLoc.lat, epflLoc.lng, playerLat, playerLon);
-    if (dist > 25) {
-      res.status(403).json({ error: `Position fausse. Tu es à ${Math.round(dist)} m du lieu (maximum 25 m).` });
-      return;
-    }
-  }
-
-  try {
-    const db = await getDb();
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    await expireDeadlinedMayors(db);
-
-    const activeMayor = (await all(db,
-      'SELECT id, userId, claimedAt, protectionEndsAt, renewalAllowedAt FROM room_mayors WHERE locationId = ? AND active = 1 LIMIT 1',
-      [locationId]
-    ))[0] ?? null;
-
-    if (activeMayor && activeMayor.userId === req.user.id) {
-      // Vérifier le cooldown de 4h entre renouvellements
-      if (activeMayor.renewalAllowedAt && nowSeconds < activeMayor.renewalAllowedAt) {
-        const waitSecs = activeMayor.renewalAllowedAt - nowSeconds;
-        const waitH = Math.floor(waitSecs / 3600);
-        const waitM = Math.floor((waitSecs % 3600) / 60);
-        const waitStr = waitH > 0 ? `${waitH}h ${waitM}min` : `${waitM} min`;
-        return res.status(429).json({ error: `Tu pourras renouveler ta photo dans ${waitStr}.` });
-      }
-      // Renouvellement : reset protection + deadline + cooldown
-      const newRenewalDeadline  = nowSeconds + ROOM_MAYOR_RENEWAL_DEADLINE_SECONDS;
-      const newRenewalAllowedAt = nowSeconds + ROOM_MAYOR_RENEWAL_COOLDOWN_SECONDS;
-      await run(db,
-        'UPDATE room_mayors SET protectionEndsAt = ?, renewalDeadline = ?, renewalAllowedAt = ? WHERE id = ?',
-        [nowSeconds + ROOM_MAYOR_PROTECTION_SECONDS, newRenewalDeadline, newRenewalAllowedAt, activeMayor.id]
-      );
-      const upload = await uploadPhotoToStorage(dataUrl, {
-        userId: req.user.id,
-        category: 'mayor',
-        createdAt: createdAt ?? Date.now(),
-      });
-      const photoResult = await run(db,
-        `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, photoUrl, storagePath, category, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'contribution', 'pending')`,
-        [req.user.id, clientId ?? null, createdAt ?? Date.now(),
-         width ?? null, height ?? null, type ?? 'image/png',
-         JSON.stringify(location), null, upload.photoUrl, upload.storagePath]
-      );
-      // Mettre à jour la photo associée au maire
-      await run(db, 'UPDATE room_mayors SET photoId = ? WHERE id = ?', [photoResult.lastID, activeMayor.id]);
-      return res.status(201).json({
-        locationId,
-        protectionEndsAt: nowSeconds + ROOM_MAYOR_PROTECTION_SECONDS,
-        renewalDeadline: newRenewalDeadline,
-        mayorUsername: req.user.username,
-      });
-    }
-
-    if (activeMayor && nowSeconds < activeMayor.protectionEndsAt) {
-      const endsDate = new Date(activeMayor.protectionEndsAt * 1000);
-      const hh = String(endsDate.getHours()).padStart(2, '0');
-      const mm = String(endsDate.getMinutes()).padStart(2, '0');
-      res.status(409).json({ error: `Ce lieu est protégé jusqu'à ${hh}:${mm}.` });
-      return;
-    }
-
-    // Déplacer l'ancien maire (protection expirée ou pas de maire)
-    if (activeMayor) {
-      await run(db, 'UPDATE room_mayors SET active = 0 WHERE id = ?', [activeMayor.id]);
-      const elapsed = nowSeconds - activeMayor.claimedAt;
-      await run(db,
-        `INSERT INTO room_mayor_totals (locationId, userId, totalSeconds) VALUES (?, ?, ?)
-         ON CONFLICT(locationId, userId) DO UPDATE SET totalSeconds = totalSeconds + excluded.totalSeconds`,
-        [locationId, activeMayor.userId, elapsed]
-      );
-    }
-
-    const upload = await uploadPhotoToStorage(dataUrl, {
-      userId: req.user.id,
-      category: 'mayor',
-      createdAt: createdAt ?? Date.now(),
-    });
-    const photoResult = await run(db,
-      `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, photoUrl, storagePath, category, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'contribution', 'pending')`,
-      [req.user.id, clientId ?? null, createdAt ?? Date.now(),
-       width ?? null, height ?? null, type ?? 'image/png',
-       JSON.stringify(location), null, upload.photoUrl, upload.storagePath]
-    );
-    const photoId = photoResult.lastID;
-    const renewalDeadline  = nowSeconds + ROOM_MAYOR_RENEWAL_DEADLINE_SECONDS;
-    const renewalAllowedAt = nowSeconds + ROOM_MAYOR_RENEWAL_COOLDOWN_SECONDS;
-
-    await run(db,
-      `INSERT INTO room_mayors (locationId, userId, claimedAt, protectionEndsAt, active, photoId, renewalDeadline, renewalAllowedAt)
-       VALUES (?, ?, ?, ?, 1, ?, ?, ?)`,
-      [locationId, req.user.id, nowSeconds, nowSeconds + ROOM_MAYOR_PROTECTION_SECONDS, photoId, renewalDeadline, renewalAllowedAt]
-    );
-
-    res.status(201).json({
-      locationId,
-      protectionEndsAt: nowSeconds + ROOM_MAYOR_PROTECTION_SECONDS,
-      renewalDeadline,
-      mayorUsername: req.user.username,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/room-mayors/:mayorId/report — signaler un maire
-app.post('/api/room-mayors/:mayorId/report', requireAuth, async (req, res) => {
-  const mayorId = parseInt(req.params.mayorId, 10);
-  if (!Number.isInteger(mayorId) || mayorId <= 0) {
-    res.status(400).json({ error: 'mayorId invalide.' });
-    return;
-  }
-  try {
-    const db = await getDb();
-    const mayor = (await all(db,
-      'SELECT id, userId, locationId FROM room_mayors WHERE id = ? AND active = 1',
-      [mayorId]
-    ))[0];
-    if (!mayor) {
-      res.status(404).json({ error: 'Periode de maire introuvable ou inactive.' });
-      return;
-    }
-    if (mayor.userId === req.user.id) {
-      res.status(403).json({ error: 'Vous ne pouvez pas signaler votre propre periode.' });
-      return;
-    }
-    try {
-      await run(db,
-        'INSERT INTO room_mayor_reports (mayorId, reportedBy, reportedAt, status) VALUES (?, ?, ?, ?)',
-        [mayorId, req.user.id, Date.now(), 'pending']
-      );
-    } catch (e) {
-      if (e.code === 'SQLITE_CONSTRAINT') {
-        res.status(409).json({ error: 'Vous avez deja signale ce maire.' });
-        return;
-      }
-      throw e;
-    }
-    const locLabel = EPFL_LOCATIONS.find(l => l.id === mayor.locationId)?.label ?? mayor.locationId;
-    const admin = (await all(db, "SELECT id FROM users WHERE username = 'dev' LIMIT 1"))[0];
-    if (admin) {
-      await run(db,
-        `INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)`,
-        [admin.id, 'mayor_report',
-         `Signalement : ${req.user.username} a signalé le maire de "${locLabel}".`,
-         Date.now()]
-      );
-    }
-    res.json({ reported: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/admin/room-mayors/pending — claims non encore examinés par l'admin
-app.get('/api/admin/room-mayors/pending', requireAuth, requireDevAccess, async (req, res) => {
-  try {
-    const db = await getDb();
-    const rows = await all(db,
-      `SELECT rm.id AS mayorId, rm.locationId, rm.claimedAt, rm.protectionEndsAt,
-              u.username, COALESCE(p.photoUrl, p.dataUrl) AS photoDataUrl, p.location AS photoLocation
-       FROM room_mayors rm
-       JOIN users u ON u.id = rm.userId
-       LEFT JOIN photos p ON p.id = rm.photoId
-       WHERE rm.active = 1 AND rm.adminReviewed = 0
-       ORDER BY rm.claimedAt DESC`,
-      []
-    );
-    const getLabel = await buildLabelResolver(db);
-    res.json(rows.map(r => ({ ...r, locationLabel: getLabel(r.locationId) })));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/admin/room-mayors/all-history — toutes les salles avec maire actuel + historique
-app.get('/api/admin/room-mayors/all-history', requireAuth, requireDevAccess, async (req, res) => {
-  try {
-    const db = await getDb();
-    const rows = await all(db,
-      `SELECT rm.id AS mayorId, rm.locationId, rm.claimedAt, rm.active, rm.adminReviewed,
-              u.username, COALESCE(p.photoUrl, p.dataUrl) AS photoDataUrl
-       FROM room_mayors rm
-       JOIN users u ON u.id = rm.userId
-       LEFT JOIN photos p ON p.id = rm.photoId
-       ORDER BY rm.locationId, rm.claimedAt DESC`,
-      []
-    );
-
-    const getLabel = await buildLabelResolver(db);
-    const result = EPFL_LOCATIONS.map(loc => {
-      const locRows = rows.filter(r => r.locationId === loc.id);
-      const current = locRows.find(r => r.active === 1) ?? null;
-      const history = locRows.filter(r => r.active === 0);
-      return {
-        locationId: loc.id,
-        locationLabel: getLabel(loc.id),
-        current,
-        history,
-      };
-    });
-
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/admin/room-mayors/reports — signalements joueurs en attente
-app.get('/api/admin/room-mayors/reports', requireAuth, requireDevAccess, async (req, res) => {
-  try {
-    const db = await getDb();
-    const getLabel = await buildLabelResolver(db);
-    const rows = await all(db,
-      `SELECT rmr.id AS reportId, rmr.mayorId, rmr.reportedBy, rmr.reportedAt,
-              rm.locationId, rm.active AS mayorActive,
-              u_mayor.username AS mayorUsername,
-              u_reporter.username AS reporterUsername,
-              COALESCE(p.photoUrl, p.dataUrl) AS photoDataUrl
-       FROM room_mayor_reports rmr
-       JOIN room_mayors rm ON rm.id = rmr.mayorId
-       JOIN users u_mayor ON u_mayor.id = rm.userId
-       JOIN users u_reporter ON u_reporter.id = rmr.reportedBy
-       LEFT JOIN photos p ON p.id = rm.photoId
-       WHERE rmr.status = 'pending'
-       ORDER BY rmr.reportedAt DESC`,
-      []
-    );
-    res.json(rows.map(r => ({ ...r, locationLabel: getLabel(r.locationId) })));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/admin/room-mayors/reports/:reportId/review — valider ou rejeter un signalement
-app.post('/api/admin/room-mayors/reports/:reportId/review', requireAuth, requireDevAccess, async (req, res) => {
-  const reportId = parseInt(req.params.reportId, 10);
-  if (!Number.isInteger(reportId) || reportId <= 0) {
-    res.status(400).json({ error: 'reportId invalide.' }); return;
-  }
-  const { decision } = req.body || {};
-  if (decision !== 'validate' && decision !== 'dismiss') {
-    res.status(400).json({ error: 'decision doit être validate ou dismiss.' }); return;
-  }
-  try {
-    const db = await getDb();
-    const getLabel = await buildLabelResolver(db);
-    // La FK rmr.mayorId → room_mayors.id identifie la période spécifique signalée.
-    // mayorUserId est donc toujours l'auteur de la photo signalée, indépendamment
-    // de qui est maire actuellement (un nouveau maire aurait un room_mayors.id différent).
-    const report = (await all(db,
-      `SELECT rmr.id, rmr.mayorId, rmr.reportedBy, rm.locationId,
-              rm.userId AS mayorUserId, rm.active AS mayorActive
-       FROM room_mayor_reports rmr
-       JOIN room_mayors rm ON rm.id = rmr.mayorId
-       WHERE rmr.id = ? AND rmr.status = 'pending'`,
-      [reportId]
-    ))[0];
-    if (!report) { res.status(404).json({ error: 'Signalement introuvable ou déjà traité.' }); return; }
-    const locLabel = getLabel(report.locationId);
-
-    if (decision === 'validate') {
-      // Signalement valide — pénalise le maire
-      await run(db, `UPDATE room_mayor_reports SET status = 'resolved_approved' WHERE id = ?`, [reportId]);
-      if (report.mayorActive) {
-        await run(db, 'UPDATE room_mayors SET active = 0 WHERE id = ?', [report.mayorId]);
-      }
-      await run(db,
-        'UPDATE room_mayor_totals SET totalSeconds = 0 WHERE locationId = ? AND userId = ?',
-        [report.locationId, report.mayorUserId]
-      );
-      await run(db,
-        'INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)',
-        [report.mayorUserId, 'photo_rejected',
-         `🚩 Photo incorrecte — ton image pour "${locLabel}" a été signalée et jugée invalide par l'admin. Ton chrono est remis à 0.${report.mayorActive ? ' Tu perds ton titre de maire.' : ''}`,
-         Date.now()]
-      );
-      await run(db,
-        'INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)',
-        [report.reportedBy, 'report_validated',
-         `✅ Ton signalement pour "${locLabel}" a été validé par l'admin. Merci !`,
-         Date.now()]
-      );
-    } else {
-      // Signalement abusif — malus au signaleur (-30min)
-      await run(db, `UPDATE room_mayor_reports SET status = 'resolved_rejected' WHERE id = ?`, [reportId]);
-      await run(db,
-        `INSERT INTO room_mayor_totals (locationId, userId, totalSeconds) VALUES (?, ?, 0)
-         ON CONFLICT(locationId, userId) DO UPDATE SET totalSeconds = GREATEST(0, totalSeconds - 1800)`,
-        [report.locationId, report.reportedBy]
-      );
-      await run(db,
-        'INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)',
-        [report.reportedBy, 'false_report',
-         `🚫 Ton signalement pour "${locLabel}" a été rejeté — la photo était valide. Malus : -30min sur ton chrono de cette salle.`,
-         Date.now()]
-      );
-    }
-    res.json({ decision, reportId, locationId: report.locationId });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/admin/room-mayors/:mayorId/review — approuver ou refuser un maire signalé
-app.post('/api/admin/room-mayors/:mayorId/review', requireAuth, requireDevAccess, async (req, res) => {
-  const mayorId = parseInt(req.params.mayorId, 10);
-  if (!Number.isInteger(mayorId) || mayorId <= 0) {
-    res.status(400).json({ error: 'mayorId invalide.' });
-    return;
-  }
-  const { decision } = req.body || {};
-  if (decision !== 'approve' && decision !== 'reject') {
-    res.status(400).json({ error: 'decision doit etre approve ou reject.' });
-    return;
-  }
-  try {
-    const db = await getDb();
-    const mayor = (await all(db,
-      `SELECT rm.id, rm.userId, rm.locationId, u.username AS mayorUsername
-       FROM room_mayors rm JOIN users u ON u.id = rm.userId WHERE rm.id = ?`,
-      [mayorId]
-    ))[0];
-    if (!mayor) {
-      res.status(404).json({ error: 'Periode de maire introuvable.' });
-      return;
-    }
-    const resolvedStatus = decision === 'approve' ? 'resolved_approved' : 'resolved_rejected';
-    await run(db,
-      `UPDATE room_mayor_reports SET status = ? WHERE mayorId = ? AND status = 'pending'`,
-      [resolvedStatus, mayorId]
-    );
-    await run(db, 'UPDATE room_mayors SET adminReviewed = 1 WHERE id = ?', [mayorId]);
-    if (decision === 'reject') {
-      await run(db, 'UPDATE room_mayors SET active = 0 WHERE id = ?', [mayorId]);
-      await run(db,
-        'UPDATE room_mayor_totals SET totalSeconds = 0 WHERE locationId = ? AND userId = ?',
-        [mayor.locationId, mayor.userId]
-      );
-      const locLabel = EPFL_LOCATIONS.find(l => l.id === mayor.locationId)?.label ?? mayor.locationId;
-      await run(db,
-        `INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)`,
-        [mayor.userId, 'mayor_revoked',
-         `🚨 Triche détectée — ta photo de revendication pour "${locLabel}" a été refusée par un administrateur. Ton chrono est remis à 0.`,
-         Date.now()]
-      );
-    }
-    res.json({ decision, locationId: mayor.locationId, mayorUsername: mayor.mayorUsername });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // -- MINI-JEUX (GUESSES) --------------------------------------
 
 // GET /api/minigames/feed — photos jouables (bucket 2, pas du joueur, pas déjà jouées en time-guess)
@@ -1507,15 +904,6 @@ function formatLocalDate(date) {
   return `${year}-${month}-${day}`;
 }
 
-function safeJsonParse(value) {
-  if (!value) return null;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
-
 function isValidUsername(value) {
   if (typeof value !== 'string') return false;
   const username = value.trim().toLowerCase();
@@ -1559,15 +947,6 @@ function computeScore(type, payload, photo) {
 function formatRealTime(createdAtMs) {
   const d = new Date(createdAtMs);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
-
-function haversineMeters(lat1, lon1, lat2, lon2) {
-  const R = 6371000;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 // -- WEBSOCKET & SERVER ---------------------------------------
@@ -1728,9 +1107,14 @@ function broadcast(message) {
   }
 }
 
+// Room-mayors and CTF routers need broadcast — mount them after broadcast is defined.
+app.use(createRoomMayorsRouter({ broadcast }));
+app.use(ctfRouter);
+
 server.listen(PORT, () => {
   const protocol = useHttps ? 'https' : 'http';
   console.log(`Photo sync server listening on ${protocol}://localhost:${PORT}`);
+  startCtfCron(broadcast);
 });
 
 
