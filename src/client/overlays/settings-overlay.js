@@ -82,6 +82,7 @@ export function createSettingsOverlay({
   panel.appendChild(makeDivider());
 
   // ── Notifications ─────────────────────────────────────────────────────────
+  /*
   const notifsRow = document.createElement('div');
   notifsRow.style.cssText = 'display:flex; align-items:center; gap:6px;';
 
@@ -107,7 +108,7 @@ export function createSettingsOverlay({
   panel.appendChild(notifsRow);
 
   panel.appendChild(makeDivider());
-
+*/
 /*
   // ── Gallery ───────────────────────────────────────────────────────────────
   const galleryBtn = makeBtn('📷 Galerie', 'rgba(255,255,255,0.1)');

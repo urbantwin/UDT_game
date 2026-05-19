@@ -29,23 +29,21 @@ function getZurichDateHour() {
   return { date, hour };
 }
 
-// Fetch top-2 teams by count of validated photos for a room. Returns teamId or null on tie/empty.
+// Controlling team is the team of the active mayor for that room.
+// Returns teamId or null if there is no active mayor with a team.
 async function computeControllingTeam(db, locationId) {
   const rows = await all(db,
-    `SELECT u.teamId, COUNT(*)::int AS cnt
-     FROM photos p
-     JOIN users u ON u.id = p.userId
-     WHERE p.locationId = $1
-       AND p.category   = 'contribution'
-       AND p.status     = 'validated'
+    `SELECT u.teamId
+     FROM room_mayors rm
+     JOIN users u ON u.id = rm.userId
+     WHERE rm.locationId = $1
+       AND rm.active = 1
        AND u.teamId IS NOT NULL
-     GROUP BY u.teamId
-     ORDER BY cnt DESC
-     LIMIT 2`,
+     ORDER BY rm.claimedAt DESC
+     LIMIT 1`,
     [locationId]
   );
   if (!rows.length) return null;
-  if (rows.length >= 2 && rows[0].cnt === rows[1].cnt) return null;
   return rows[0].teamId;
 }
 

@@ -1,23 +1,23 @@
 import { login, register, logout } from '../services/auth-api.js';
 
 const KING_RULES = [
-  'Photographiez une salle pour la revendiquer pour votre équipe.',
-  'Votre équipe contrôle la salle si elle a le plus de photos validées.',
-  'Des points sont attribués toutes les heures pour chaque salle contrôlée.',
-  'Bonus x2 à 19h et à minuit.',
-  'Re-photographiez une salle toutes les 15h pour maintenir le contrôle.',
-  'Cooldown de 4h entre deux revendications de la même salle.',
-  'La photo d\'un maire invaincu vaut +100 pts (accordé par l\'admin).',
+  'Dans King of Campus, trois équipes s\'affrontent pour contrôler le plus de salles',
+  '50 salles de l\'EPFL peuvent être revendiquées sur 4 étages',
+  'Pour revendiquer une salle et en devenir le ou la maire, rendez-vous physiquement sur les lieux et prenez une photo de la salle.',
+  'La photo doit permettre d\'identifier clairement la salle, et peut être signalée par vos adversaires si elle n\'est pas valide',
+  'Quand vous devenez maire, vous contrôlez la salle pendant 24h: au-delà de ce délai elle redevient neutre si vous ne prenez pas une nouvelle photo',
+  'Mais attention, rien n\'est acquis, car vos adversaires peuvent aussi revendiquer une salle que vous contrôlez et vous prendre votre place de maire !',
+  'CLASSEMENT ET SCORE:',
+  ' - à chaque heure pile, tu reçois un point par salle que tu contrôles',
+  ' - à chaque heure pile, ton équipe reçoit un point par salle que tu contrôles',
+  ' - à chaque heure pile, l\'équipe qui contrôle le plus de salles au total reçoit 3 points de bonus pour domination',
+  ' - à 13h et 14h, les équipes reçoivent 1 point bonus pour chaque salle qu\'elles contrôlent (bonus pause déj)',
+  'ATTENTION: la triche n\'est pas tolérée et sera sévèrement réprimandée',
+  'Par example, les photos invalides signalées sont punies par un malus de 10 points'
 ];
 
 const GUESSR_RULES = [
-  'Prenez des photos de points d\'intérêt du campus EPFL.',
-  '+10 pts quand votre contribution est acceptée par l\'IA.',
-  'Répondez aux défis lancés par d\'autres joueurs : +25 pts si validé.',
-  'Bonus GPS : +10 pts à <25m, +5 pts à <50m, +1 pt à <100m de la cible.',
-  'Mini-jeu Géo-pin : devinez l\'emplacement de la photo (jusqu\'à 1000 pts).',
-  'Mini-jeu Re-photo : retournez sur place et reprenez la même photo (300 pts).',
-  'Mini-jeu Time-guess : devinez l\'heure à laquelle la photo a été prise (jusqu\'à 500 pts).',
+  'EPFL Guessr n\est actuellement pas testé'
 ];
 
 export function createLandingOverlay({ onGameChosen, onUserLoaded, onLogout } = {}) {
@@ -395,31 +395,39 @@ export function createLandingOverlay({ onGameChosen, onUserLoaded, onLogout } = 
     container.appendChild(submitBtn);
   }
 
-  function buildRulesSection(card) {
-    const wrapper = document.createElement('div');
-    wrapper.style.cssText = 'margin-top:24px; text-align:left;';
+function buildRulesSection(card) {
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = 'margin-top:24px; text-align:center;';
 
-    const mainToggle = makeAccordionToggle('📖  Règlement des jeux', '#555', '#444');
-    wrapper.appendChild(mainToggle.btn);
+  const rulesBtn = document.createElement('button');
+  rulesBtn.textContent = '📖 Voir le règlement des jeux';
 
-    const mainBody = document.createElement('div');
-    mainBody.style.cssText = 'display:none; margin-top:8px;';
+  rulesBtn.style.cssText = `
+    padding:12px 20px;
+    background:#555;
+    color:white;
+    border:none;
+    border-radius:10px;
+    font-weight:600;
+    cursor:pointer;
+    transition:background 0.2s ease;
+  `;
 
-    const kingSection = makeRulesBlock('👑 King of Campus', KING_RULES, '#6366f1');
-    const guessrSection = makeRulesBlock('🗺️ EPFL Guessr', GUESSR_RULES, '#0ea5e9');
+  rulesBtn.addEventListener('mouseenter', () => {
+    rulesBtn.style.background = '#444';
+  });
 
-    mainBody.appendChild(kingSection);
-    mainBody.appendChild(guessrSection);
-    wrapper.appendChild(mainBody);
+  rulesBtn.addEventListener('mouseleave', () => {
+    rulesBtn.style.background = '#555';
+  });
 
-    mainToggle.btn.addEventListener('click', () => {
-      const open = mainBody.style.display === 'none';
-      mainBody.style.display = open ? 'block' : 'none';
-      mainToggle.arrow.textContent = open ? '▾' : '▸';
-    });
+  rulesBtn.addEventListener('click', () => {
+    window.open('/reglement.html', '_blank');
+  });
 
-    card.appendChild(wrapper);
-  }
+  wrapper.appendChild(rulesBtn);
+  card.appendChild(wrapper);
+}
 
   function makeAccordionToggle(label, bg, hover) {
     const btn = document.createElement('button');
