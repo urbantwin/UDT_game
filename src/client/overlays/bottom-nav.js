@@ -11,7 +11,7 @@ export function createBottomNav({
 
   // ── Logo ──────────────────────────────────────────────────────────────────
   const logo = document.createElement('img');
-  logo.src = '/logo.jpeg';
+  logo.src = '/logo_king.png';
   logo.alt = 'EPFL Guessr';
   logo.style.cssText = `
     position:fixed; left:50px; top:14px; z-index:1100;
@@ -48,21 +48,40 @@ export function createBottomNav({
   userBlock.appendChild(userNameEl);
   container.appendChild(userBlock);
 
-  // Bouton classements (sous userBlock)
-  const leaderboardBtn = document.createElement('button');
-  leaderboardBtn.style.cssText = `
-    position:fixed; left:50px; top:112px; z-index:1100;
-    display:none;
-    background:rgba(99,102,241,0.7); color:#fff; border:none;
-    border-radius:8px; padding:3px 9px;
-    font:600 9px system-ui,sans-serif; letter-spacing:0.06em;
-    cursor:pointer; transition:background 0.15s;
-  `;
-  leaderboardBtn.textContent = '📊 Classements';
-  leaderboardBtn.addEventListener('mouseenter', () => { leaderboardBtn.style.background = 'rgba(99,102,241,0.95)'; });
-  leaderboardBtn.addEventListener('mouseleave', () => { leaderboardBtn.style.background = 'rgba(99,102,241,0.7)'; });
-  leaderboardBtn.addEventListener('click', () => onOpenLeaderboard?.());
-  container.appendChild(leaderboardBtn);
+// Bouton classements (sous userBlock)
+const leaderboardBtn = document.createElement('button');
+leaderboardBtn.style.cssText = `
+  position:fixed;
+  left:50px;
+  top:112px;
+  z-index:1100;
+  display:none;
+  background:linear-gradient(135deg, rgba(99,102,241,0.95), rgba(79,70,229,0.95));
+  color:#fff;
+  border:none;
+  border-radius:14px;
+  padding:12px 20px;
+  font:700 16px system-ui,sans-serif;
+  letter-spacing:0.03em;
+  cursor:pointer;
+  box-shadow:0 6px 18px rgba(79,70,229,0.35);
+  backdrop-filter:blur(8px);
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+`;
+leaderboardBtn.textContent = '📊 Classements';
+leaderboardBtn.addEventListener('mouseenter', () => {
+  leaderboardBtn.style.transform = 'scale(1.05)';
+  leaderboardBtn.style.boxShadow = '0 10px 24px rgba(79,70,229,0.5)';
+});
+leaderboardBtn.addEventListener('mouseleave', () => {
+  leaderboardBtn.style.transform = 'scale(1)';
+  leaderboardBtn.style.boxShadow = '0 6px 18px rgba(79,70,229,0.35)';
+});
+leaderboardBtn.addEventListener('click', () => onOpenLeaderboard?.());
+container.appendChild(leaderboardBtn);
 
   // Compteur de salles — centré en haut
   const roomCountEl = document.createElement('div');
@@ -139,6 +158,7 @@ export function createBottomNav({
   let currentMode = 'guessr';
 
   // ── API publique ──────────────────────────────────────────────────────────
+  
   function setMode(mode) {
     currentMode = mode;
     if (mode === 'king') {

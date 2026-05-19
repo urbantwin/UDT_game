@@ -130,10 +130,6 @@ export function createMapView({ containerId, config }) {
       });
       new FloorControl().addTo(map);
 
-      if (buildingsLayer) {
-        L.control.layers(null, { 'Bâtiments': buildingsLayer }).addTo(map);
-      }
-
     } catch (err) {
       console.error('[map] Erreur chargement shapefiles:', err);
     }

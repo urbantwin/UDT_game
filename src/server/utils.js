@@ -69,7 +69,10 @@ function getPhotoExtension(mimeType = 'image/png') {
   return map[mimeType.toLowerCase()] ?? 'bin';
 }
 
-export async function uploadPhotoToStorage(dataUrl, { userId, category = 'photo', createdAt = Date.now() } = {}) {
+export async function uploadPhotoToStorage(
+  dataUrl,
+  { userId, category = 'photo', createdAt = Date.now(), locationId } = {}
+) {
   const parsed = parseDataUrl(dataUrl);
   if (!parsed) {
     throw new Error('Invalid image payload. Expected a base64 data URL.');
@@ -77,7 +80,10 @@ export async function uploadPhotoToStorage(dataUrl, { userId, category = 'photo'
 
   const fileBuffer = Buffer.from(parsed.base64, 'base64');
   const extension = getPhotoExtension(parsed.mimeType);
-  const storagePath = `${category}/${String(userId ?? 'anon')}/${createdAt}-${randomUUID()}.${extension}`;
+  const groupingKey = category === 'mayor'
+    ? String(locationId ?? 'unknown-room')
+    : String(userId ?? 'anon');
+  const storagePath = `${category}/${groupingKey}/${createdAt}-${randomUUID()}.${extension}`;
   const supabase = getSupabaseAdmin();
 
   const { error } = await supabase.storage

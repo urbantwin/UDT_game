@@ -188,6 +188,7 @@ export default function createRoomMayorsRouter({ broadcast }) {
           userId: req.user.id,
           category: 'mayor',
           createdAt: createdAt ?? Date.now(),
+          locationId,
         });
         const photoResult = await run(db,
           `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, photoUrl, storagePath, locationId, category, status)
@@ -227,6 +228,7 @@ export default function createRoomMayorsRouter({ broadcast }) {
         userId: req.user.id,
         category: 'mayor',
         createdAt: createdAt ?? Date.now(),
+        locationId,
       });
       const photoResult = await run(db,
         `INSERT INTO photos (userId, clientId, createdAt, width, height, type, location, dataUrl, photoUrl, storagePath, locationId, category, status)

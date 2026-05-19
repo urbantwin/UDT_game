@@ -211,6 +211,7 @@ export function createSettingsOverlay({
 
   kingSection.appendChild(makeDivider());
 
+  /* // Removed switchmode button
   const switchModeBtn = makeBtn('🎮 Changer de jeu', 'rgba(99,102,241,0.7)');
   switchModeBtn.style.color = '#fff';
   switchModeBtn.style.width = '100%';
@@ -219,6 +220,7 @@ export function createSettingsOverlay({
     onSwitchMode?.();
   });
   kingSection.appendChild(switchModeBtn);
+*/
 
   panel.appendChild(kingSection);
 

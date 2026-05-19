@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env
 .env.local
+data/photos.db
 certs/
 *.pem
 *.crt

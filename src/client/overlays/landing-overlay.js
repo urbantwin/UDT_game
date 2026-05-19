@@ -83,7 +83,7 @@ export function createLandingOverlay({ onGameChosen, onUserLoaded, onLogout } = 
     logo.style.cssText = 'font-size:48px; margin-bottom:8px; line-height:1;';
 
     const title = document.createElement('h1');
-    title.textContent = 'UDT Game';
+    title.textContent = 'EPFL Minigames';
     title.style.cssText = `
       color:#fff; font:800 30px system-ui; margin:0 0 4px; letter-spacing:-0.5px;
     `;
@@ -150,39 +150,70 @@ export function createLandingOverlay({ onGameChosen, onUserLoaded, onLogout } = 
     `;
     card.appendChild(label);
 
-    const btnKing = makeGameBtn('👑  King of Campus', '#6366f1', '#4f46e5');
-    const btnGuessr = makeGameBtn('🗺️  EPFL Guessr', '#0ea5e9', '#0284c7');
+    const row = document.createElement('div');
+    row.style.cssText = `
+      display:flex; gap:12px; justify-content:center; margin-bottom:8px;
+    `;
 
-    btnKing.addEventListener('click', () => {
-      onGameChosen?.('king', user);
-      hide();
-    });
-    btnGuessr.addEventListener('click', () => {
-      onGameChosen?.('guessr', user);
-      hide();
+    const cardGuessr = makeLogoCard('/logo.jpeg', 'EPFL Guessr', '#0ea5e9');
+    const cardKing   = makeLogoCard('/logo_king.png', 'King of Campus', '#6366f1');
+
+//    cardGuessr.addEventListener('click', () => { onGameChosen?.('guessr', user); hide(); });
+// for now, no EPFL Guessr available to avoid confusion
+    cardGuessr.addEventListener('click', () => {
+      showUnavailableOverlay();
     });
 
-    card.appendChild(btnKing);
-    card.appendChild(btnGuessr);
+    cardKing.addEventListener('click',   () => { onGameChosen?.('king',   user); hide(); });
+
+    row.appendChild(cardGuessr);
+    row.appendChild(cardKing);
+    card.appendChild(row);
   }
 
-  function makeGameBtn(label, bg, hover) {
+  function makeLogoCard(src, name, accentColor) {
     const btn = document.createElement('button');
-    btn.textContent = label;
+    btn.type = 'button';
     btn.style.cssText = `
-      display:block; width:100%; margin-bottom:12px;
-      background:${bg}; color:#fff; border:none; border-radius:12px;
-      min-height:56px; font:700 16px system-ui;
-      cursor:pointer; transition:background 0.15s, transform 0.1s;
+      flex:1; display:flex; flex-direction:column; align-items:center; gap:10px;
+      background:rgba(255,255,255,0.05);
+      border:2px solid rgba(255,255,255,0.1);
+      border-radius:14px; padding:14px 8px 12px;
+      cursor:pointer;
+      transition:border-color 0.15s, transform 0.1s, background 0.15s;
+      -webkit-tap-highlight-color:transparent;
     `;
+
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = name;
+    img.style.cssText = `
+      width:100%; max-width:120px; aspect-ratio:1/1;
+      object-fit:contain; border-radius:10px;
+      pointer-events:none;
+    `;
+
+    const nameEl = document.createElement('span');
+    nameEl.textContent = name;
+    nameEl.style.cssText = `
+      color:#fff; font:600 12px system-ui; text-align:center;
+      pointer-events:none;
+    `;
+
+    btn.appendChild(img);
+    btn.appendChild(nameEl);
+
     btn.addEventListener('mouseenter', () => {
-      btn.style.background = hover;
-      btn.style.transform = 'translateY(-1px)';
+      btn.style.borderColor = accentColor;
+      btn.style.background = `${accentColor}22`;
+      btn.style.transform = 'translateY(-2px)';
     });
     btn.addEventListener('mouseleave', () => {
-      btn.style.background = bg;
+      btn.style.borderColor = 'rgba(255,255,255,0.1)';
+      btn.style.background = 'rgba(255,255,255,0.05)';
       btn.style.transform = 'translateY(0)';
     });
+
     return btn;
   }
 
@@ -443,6 +474,67 @@ export function createLandingOverlay({ onGameChosen, onUserLoaded, onLogout } = 
 
     return block;
   }
+
+// MODE DE JEU EPFL GUESSR INDISPONIBLE FUNCTION
+function showUnavailableOverlay() {
+  const unavailable = document.createElement('div');
+
+  unavailable.style.cssText = `
+    position:fixed;
+    inset:0;
+    z-index:20000;
+    background:#808080;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex-direction:column;
+    text-align:center;
+    padding:24px;
+    font-family:system-ui, sans-serif;
+  `;
+
+  const title = document.createElement('h1');
+  title.textContent = 'Mode de jeu temporairement indisponible';
+  title.style.cssText = `
+    color:white;
+    font-size:32px;
+    font-weight:800;
+    margin:0 0 12px;
+  `;
+
+  const text = document.createElement('p');
+  text.textContent = 'EPFL Guessr est actuellement désactivé pour développement, mais vous pouvez jouer au mode King of Campus';
+  text.style.cssText = `
+    color:#f0f0f0;
+    font-size:16px;
+    margin:0 0 28px;
+    max-width:420px;
+    line-height:1.5;
+  `;
+
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = 'Retour';
+  closeBtn.style.cssText = `
+    background:white;
+    color:#444;
+    border:none;
+    border-radius:10px;
+    padding:12px 20px;
+    font:700 14px system-ui;
+    cursor:pointer;
+  `;
+
+  closeBtn.addEventListener('click', () => {
+    unavailable.remove();
+  });
+
+  unavailable.appendChild(title);
+  unavailable.appendChild(text);
+  unavailable.appendChild(closeBtn);
+
+  document.body.appendChild(unavailable);
+}
+
 
   function remove() {
     hide();
