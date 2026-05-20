@@ -11,6 +11,9 @@ function labelToId(label) {
 }
 
 export function createMapView({ containerId, config }) {
+  const ACCENT_BORDER = 'rgba(99,102,241,0.78)';
+  const PANEL_BG = 'rgba(15,15,25,0.62)';
+
   const map = L.map(containerId, {
     center: [config.center.lat, config.center.lon],
     zoom: config.initialZoom,
@@ -89,7 +92,7 @@ export function createMapView({ containerId, config }) {
       let buildingsLayer = null;
       if (layer1Data) {
         buildingsLayer = L.geoJSON(layer1Data, {
-          style: { color: '#8f8f8f', weight: 2, fillOpacity: 0.8 }
+        style: { color: '#8f8f8f', weight: 2, fillOpacity: 0.8 }
         }).addTo(map);
       }
 
@@ -102,7 +105,7 @@ export function createMapView({ containerId, config }) {
       )].sort((a, b) => a - b);
 
       if (floors.length === 0) return;
-      currentFloor = floors[0];
+      currentFloor = floors.includes(1) ? 1 : floors[0];
       roomsLayer = makeRoomsLayer(currentFloor);
       if (roomsLayer) roomsLayer.addTo(map);
 
@@ -111,17 +114,43 @@ export function createMapView({ containerId, config }) {
         options: { position: 'bottomleft' },
         onAdd() {
           const container = L.DomUtil.create('div', 'floor-control');
+          container.style.cssText = `
+            background:${PANEL_BG};
+            border:1.5px solid ${ACCENT_BORDER};
+            border-radius:10px;
+            box-shadow:0 4px 14px rgba(0,0,0,0.35);
+            color:#fff;
+            backdrop-filter:blur(4px);
+            overflow:hidden;
+            display:flex;
+            align-items:center;
+          `;
           container.innerHTML = `
             <button id="floor-down">−</button>
             <span id="floor-label">Étage ${currentFloor}</span>
             <button id="floor-up">+</button>
           `;
+          const upBtn = container.querySelector('#floor-up');
+          const downBtn = container.querySelector('#floor-down');
+          const labelEl = container.querySelector('#floor-label');
+          [upBtn, downBtn].forEach((btn) => {
+            btn.style.cssText = `
+              width:36px; height:36px; border:none; cursor:pointer;
+              background:rgba(99,102,241,0.18); color:#ffffff;
+              font:700 22px/1 system-ui,sans-serif;
+            `;
+          });
+          labelEl.style.cssText = `
+            min-width:78px; text-align:center; padding:0 8px;
+            color:#ffffff; font:600 12px system-ui,sans-serif;
+            text-shadow:0 1px 2px rgba(0,0,0,0.45);
+          `;
           L.DomEvent.disableClickPropagation(container);
-          container.querySelector('#floor-up').onclick = () => {
+          upBtn.onclick = () => {
             const idx = floors.indexOf(currentFloor);
             if (idx < floors.length - 1) applyFloor(floors[idx + 1]);
           };
-          container.querySelector('#floor-down').onclick = () => {
+          downBtn.onclick = () => {
             const idx = floors.indexOf(currentFloor);
             if (idx > 0) applyFloor(floors[idx - 1]);
           };
