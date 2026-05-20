@@ -565,6 +565,7 @@ export function createSettingsOverlay({
   }
 
   function setNotifBadge(count) {
+    if (typeof notifBadge === 'undefined') return;
     notifBadge.textContent = count > 9 ? '9+' : String(count);
     notifBadge.style.display = count > 0 ? 'flex' : 'none';
   }
