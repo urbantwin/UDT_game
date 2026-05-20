@@ -124,6 +124,7 @@ export function createMapView({ containerId, config }) {
             overflow:hidden;
             display:flex;
             align-items:center;
+            margin-bottom:44px;
           `;
           container.innerHTML = `
             <button id="floor-down">−</button>

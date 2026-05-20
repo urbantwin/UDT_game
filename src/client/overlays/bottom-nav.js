@@ -51,7 +51,7 @@ export function createBottomNav({
   const leaderboardBtn = document.createElement('button');
   leaderboardBtn.style.cssText = `
     position:fixed;
-    left:50px;
+    left:20px;
     top:88px;
     z-index:1100;
     display:none;
@@ -85,7 +85,7 @@ export function createBottomNav({
   const roomListBtn = document.createElement('button');
   roomListBtn.style.cssText = `
     position:fixed;
-    left:50px;
+    left:20px;
     top:136px;
     z-index:1100;
     display:none;
@@ -118,13 +118,14 @@ export function createBottomNav({
 
   const roomCountEl = document.createElement('div');
   roomCountEl.style.cssText = `
-    position:fixed; top:14px; right:72px; z-index:1100;
+    position:fixed; top:102px; right:16px; z-index:1100;
     display:none;
     background:rgba(99,102,241,0.75); color:#fff;
     font:700 11px system-ui,sans-serif; letter-spacing:0.04em;
-    padding:4px 14px; border-radius:20px;
+    padding:4px 10px; border-radius:10px;
     box-shadow:0 2px 8px rgba(0,0,0,0.35);
     pointer-events:none;
+    text-align:left;
   `;
   container.appendChild(roomCountEl);
 
@@ -178,6 +179,10 @@ export function createBottomNav({
 
   const adminBtn = makeIconBtn('🔧', 'rgba(245,158,11,0.35)', 'Admin');
   adminBtn.style.display = 'none';
+  adminBtn.style.position = 'fixed';
+  adminBtn.style.right = '14px';
+  adminBtn.style.left = 'auto';
+  adminBtn.style.bottom = '108px';
   adminBtn.addEventListener('click', () => onAdmin?.());
   iconGroup.appendChild(adminBtn);
 
