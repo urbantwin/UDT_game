@@ -129,10 +129,7 @@ export function createLandingOverlay({ onGameChosen, onUserLoaded, onLogout } = 
       logoutBtn.disabled = true;
       await logout().catch(() => {});
       onLogout?.();
-      // Rebuild card to show login form
-      while (card.children.length > 3) card.removeChild(card.lastChild);
-      buildAuthSection(card, overlay);
-      buildRulesSection(card);
+      show(null);
     });
 
     row.appendChild(welcome);
