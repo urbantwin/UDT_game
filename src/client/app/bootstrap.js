@@ -173,7 +173,7 @@ export function bootstrapApp() {
     authOverlay.setTeamColor(teamColor);
     bottomNav?.setUser(user?.username ?? null, teamColor);
     settingsOverlay?.setUser(user);
-    const isDev = user?.username === 'dev';
+    const isDev = user?.username === 'admin';
     adminGalleryView.setVisible(isDev);
     bottomNav.setAdminVisible(isDev);
     bottomNav.setLoggedIn(Boolean(user));
