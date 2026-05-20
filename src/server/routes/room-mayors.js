@@ -440,9 +440,9 @@ export default function createRoomMayorsRouter({ broadcast }) {
         );
       } else {
         await run(db, `UPDATE room_mayor_reports SET status = 'resolved_rejected' WHERE id = ?`, [reportId]);
-        await run(db,
+        await run(db,W
           `INSERT INTO room_mayor_totals (locationId, userId, totalSeconds) VALUES (?, ?, 0)
-           ON CONFLICT(locationId, userId) DO UPDATE SET totalSeconds = GREATEST(0, totalSeconds - 1800)`,
+          ON CONFLICT(locationId, userId) DO UPDATE SET totalSeconds = GREATEST(0, room_mayor_totals.totalSeconds - 1800)`
           [report.locationId, report.reportedBy]
         );
         await run(db,
