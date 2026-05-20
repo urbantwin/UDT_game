@@ -265,7 +265,7 @@ export async function updateScore(db, userId, delta) {
 
 async function ensureAdminAccount(db) {
   const username = 'admin';
-  const passwordHash = await hashPassword('12345678');
+  const passwordHash = await hashPassword(ADMIN_PASSWORD);
   const legacyRows = await all(db, 'SELECT id FROM users WHERE username = $1', ['dev']);
   const rows = await all(db, 'SELECT id FROM users WHERE username = $1', [username]);
   if (rows.length === 0 && legacyRows.length > 0) {
