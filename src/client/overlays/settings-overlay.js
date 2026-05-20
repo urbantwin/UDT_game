@@ -15,6 +15,7 @@ const NOTIFS_KEY = 'udt-notifs-enabled';
 export function createSettingsOverlay({
   container = document.body,
   onAuthChange,
+  onLogoutToLanding,
   onOpenGallery,
   onEnableNotifs,
   onDisableNotifs,
@@ -453,6 +454,8 @@ export function createSettingsOverlay({
     refreshAuthUi();
     gameMode === 'king' ? loadKingScore() : loadMyScore();
     onAuthChange?.(null);
+    onLogoutToLanding?.();
+    close();
   });
 /*
   galleryBtn.addEventListener('click', () => {

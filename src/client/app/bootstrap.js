@@ -231,6 +231,9 @@ export function bootstrapApp() {
       applyUser(user);
       if (!user && gameMode === 'king') switchMode('guessr');
     },
+    onLogoutToLanding: () => {
+      landingOverlay.show(null);
+    },
     onOpenGallery: () => galleryView.open(),
     onEnableNotifs: (callback) => scheduler.enableNotifications(callback),
     onDisableNotifs: () => {},
