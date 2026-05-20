@@ -169,6 +169,6 @@ export const ROOM_MAYOR_RENEWAL_COOLDOWN_SECONDS = 14400; // 4 h   — délai mi
 export const CTF_SCORING = {
   pointsPerRoomPerHour: 1,   // points par salle contrôlée par heure
   dominationBonus:      3,   // bonus à l'équipe qui contrôle le plus de salles
-  bonusWindowPoints:    3,   // bonus à 19h et minuit
+  bonusWindowPoints:    3,   // bonus à midi et 14h
   fraudPenalty:        -10,  // malus équipe si photo de revendication refusée par l'admin
 };

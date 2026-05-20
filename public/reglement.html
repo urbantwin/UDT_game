@@ -179,81 +179,89 @@
 
     <!-- Concept -->
     <section>
-      <h2><span class="icon">🗺️</span> Concept</h2>
+      <h2><span class="icon">🗺️</span> Cette page est en travaux</h2>
       <p style="color:#cbd5e1; font-size:0.95rem; line-height:1.7;">
-        UDT Game est un jeu de photographie géolocalisée sur le campus de l'EPFL.
-        Les joueurs contribuent des photos de lieux du campus, et doivent retrouver
-        les lieux photographiés par les autres — le tout en temps réel sur la carte.
+        Les informations que vous lirez ici ne sont pas forcément d'actualité et nous travaillons actuellement à les mettre à jour
       </p>
     </section>
 
     <!-- Comment jouer -->
     <section>
-      <h2><span class="icon">🎮</span> Comment jouer</h2>
+      <h2><span class="icon">🎮</span> King of Campus</h2>
       <ol>
-        <li><b>Active ton GPS</b> — indispensable pour soumettre une photo.</li>
-        <li><b>Prends une photo</b> sur le campus EPFL avec l'appareil photo intégré.</li>
-        <li>Après la capture, choisis <b>Submit</b> pour soumettre, <b>Reprendre</b> pour retenter, ou <b>Annuler</b>.</li>
-        <li>Ta photo est envoyée en <b>validation admin</b> (Bucket 1).</li>
-        <li>Si acceptée, elle rejoint le <b>pool de challenges</b> (Bucket 2) et sera servie à d'autres joueurs.</li>
-        <li>Reçois un <b>challenge</b> : une photo d'un lieu du campus que tu dois retrouver et rephotographier.</li>
-        <li>Va sur place, prends la photo du même endroit → ta réponse est validée ou rejetée par l'admin.</li>
+        Dans King of Campus, trois équipes s'affrontent pour contrôler le plus de salles de l'EPFL
+        parmi 50 salles revendicables sur 4 étages. Qui des rouges, verts ou bleus l'emportera ?
+      </ol>
+    </section>
+
+    <!-- Comment jouer -->
+    <section>
+      <h2><span class="icon">🎮</span> Comment jouer ?</h2>
+      <ol>
+        Ce jeu nécessite que tu actives la localisation sur ton téléphone ainsi que l'accès à la caméra.
+        Pour revendiquer une salle et en devenir le maire, rends-toi physiquement sur les lieux et prends une photo de l'intérieur de la salle.
+        La photo doit permettre d'identifier clairement la salle et peut être signalée par tes adversaires si elle n'est pas valide.
+        Quand tu deviens maire de la salle, tu la contrôles au nom de ton équipe pednant 15h. Au dela de ce délai, elle redevient neutre. Assures-toi de prendre des photos régulièrement
+         pour maintenir le contrôle (tu peux renouveler ton contrôle toutes les 4 heures). Mais attention, rien n'est acquis, car tes adversaires peuvent 
+         aussi revendiquer une salle que ton équipe contrôle et prendre ta place de maire ! (tu as un délai de 5 minutes avant que le salle puisse renvendiquée par d'autres équipes)
       </ol>
     </section>
 
     <!-- Système de score -->
     <section>
       <h2><span class="icon">🏆</span> Système de points</h2>
+      Chaque heure pile (11h00, 12h00, etc.), des points sont distribués comme suit:
       <table class="score-table">
         <tr>
-          <td>Photo contribution soumise</td>
-          <td><span class="pts green">+5 pts</span></td>
-          <td>Dès qu'une photo est soumise au jeu (GPS requis).</td>
+          <td>Points d'équipe</td>
+          <td><span class="pts green">+1 pt</span></td>
+          <td>Pour chaque salle que l'équipe contrôle à l'heure pile</td>
         </tr>
         <tr>
-          <td>Challenge réussi</td>
-          <td><span class="pts green">+25 pts</span></td>
-          <td>Ta photo de réponse est validée par l'admin — tu as bien trouvé le lieu.</td>
+          <td>Points individuels</td>
+          <td><span class="pts green">+1 pt</span></td>
+          <td>Pour chaque salle que tu contrôles à titre personnel à l'heure pile</td>
         </tr>
         <tr>
-          <td>Mauvaise réponse</td>
-          <td><span class="pts red">−2 pts</span></td>
-          <td>Ta réponse au challenge est rejetée — ce n'était pas le bon endroit.</td>
+          <td>Bonus de domination</td>
+          <td><span class="pts green">+3 pts</span></td>
+          <td>Pour l'équipe qui contrôle le plus grand nombre de salles à l'heure pile. Ne s'applique pas en cas d'égalité</td>
+        </tr>
+          <tr>
+          <td>Bonus pause-déj</td>
+          <td><span class="pts green">+3 pts</span></td>
+          <td>À midi et à 14h00, les équipes reçoivent 3 points bonus par salle contrôlée. Et oui, il faut profiter de ta pause déjà pour revendiquer un max de salles !</td>
         </tr>
         <tr>
-          <td>Photo invincible</td>
-          <td><span class="pts yellow">+100 pts</span></td>
-          <td>Personne n'a réussi à retrouver le lieu de <i>ta</i> photo soumise — tu es imbattable !</td>
+          <td>Photo invalide ou frauduleuse</td>
+          <td><span class="pts red">−10 pts</span></td>
+          <td>Si l'admin confirme que ta photo ne permet pas bien d'identifier la salle après signalement par d'autres utilisateurs</td>
         </tr>
       </table>
 
       <div class="highlight" style="margin-top:18px;">
-        💡 Le score ne peut pas descendre en dessous de 0. Les points sont cumulés
-        sur toute la durée du jeu.
+        💡 Les scores négatifs sont possibles ! La triche ne pardonne pas. Sois fair.
       </div>
     </section>
 
     <!-- Flux des photos (buckets) -->
     <section>
-      <h2><span class="icon">📂</span> Cycle de vie d'une photo</h2>
+      <h2><span class="icon">📂</span> Comportements inappropriés</h2>
+      Pour le bon déroulement du jeu, il est formellement interdit de:
       <ol>
-        <li><b>Bucket 1 — En attente :</b> ta photo vient d'être soumise, l'admin la vérifie.</li>
-        <li><b>Bucket 2 — Pool validé :</b> acceptée ! Elle attend d'être servie en challenge.</li>
-        <li><b>Bucket 3 — Réponse en attente :</b> un joueur a répondu au challenge, l'admin vérifie sa photo.</li>
-        <li><b>Bucket 4 — Base finale :</b> réponse validée, le challenge est résolu.</li>
+        <li>Créer plusieurs comptes par personne</li>
+        <li>Partager ton mot de passe pour demander à d'autres personnes de prendre les photos pour toi</li>
+        <li>Revendiquer une salle en étant proche, mais pas à l'intérieur</li>
+        Ces comportements seront sévèrement punis par une exclusion du classement final et de la récompense !
       </ol>
     </section>
 
     <!-- Règles -->
     <section>
-      <h2><span class="icon">📋</span> Règles</h2>
+      <h2><span class="icon">📋</span> Récompense</h2>
       <ul>
-        <li>Le <b>GPS doit être activé</b> pour soumettre une photo ou répondre à un challenge.</li>
-        <li>Les photos doivent être prises <b>sur le campus EPFL</b>.</li>
-        <li>Chaque joueur peut soumettre plusieurs photos, mais ne peut répondre qu'à un challenge à la fois.</li>
-        <li>Tu ne peux pas répondre à un challenge avec <b>ta propre photo</b>.</li>
-        <li>L'admin peut <b>rejeter</b> une photo si elle ne correspond pas au lieu ou aux critères du jeu.</li>
-        <li>Tout abus ou triche entraîne l'exclusion du classement.</li>
+        En plus d'un egoboost et du droit d'humilier à jamais les équipes que tu as battues, gagner en tant
+        que joueur individuel te permettra peut-être de gagner une bière à Sat (selon le budget qu'on pourra y allouer...)
       </ul>
     </section>
 
@@ -262,7 +270,7 @@
     </div>
 
     <footer>
-      <p>UDT Game · EPFL · 2025</p>
+      <p>EPFL Minigames · EPFL · 2026</p>
     </footer>
 
   </div>

@@ -102,7 +102,7 @@ async function runHourlyScoring(db, broadcast) {
   }
 }
 
-// Award bonus points at 19:00 and 00:00 Zurich time. Guarded by bonusWindowsAwarded Set.
+// Award bonus points at 12:00 and 14:00 Zurich time. Guarded by bonusWindowsAwarded Set.
 async function runBonusScoring(db, broadcast, reason) {
   const { date, hour } = getZurichDateHour();
   const key = `${date}-${hour}h`;
@@ -308,11 +308,11 @@ export function startCtfCron(broadcast) {
 
       await runHourlyScoring(db, broadcast);
 
-      if (hour === 19) {
-        await runBonusScoring(db, broadcast, 'bonus_19h');
+      if (hour === 12) {
+        await runBonusScoring(db, broadcast, 'bonus_12h');
       }
-      if (hour === 0) {
-        await runBonusScoring(db, broadcast, 'bonus_midnight');
+      if (hour === 14) {
+        await runBonusScoring(db, broadcast, 'bonus_14h');
       }
     } catch (err) {
       console.error('[ctf-cron] Error:', err.message);
