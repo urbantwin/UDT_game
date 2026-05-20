@@ -44,9 +44,9 @@ export function createMapView({ containerId, config }) {
         const locId = labelToId(f.properties.label_new);
         const room = ctfRooms.find(r => r.locationId === locId);
         if (room?.teamColor) {
-          return { color: room.teamColor, weight: 2, fillColor: room.teamColor, fillOpacity: 0.55 };
+          return { color: '#facc15', weight: 1.2, fillColor: room.teamColor, fillOpacity: 0.55 };
         }
-        return { color: '#888888', weight: 1.5, fillColor: '#aaaaaa', fillOpacity: 0.25 };
+        return { color: '#facc15', weight: 1.2, fillColor: '#aaaaaa', fillOpacity: 0.25 };
       },
       onEachFeature(feature, layer) {
         const label = feature.properties.label_new;

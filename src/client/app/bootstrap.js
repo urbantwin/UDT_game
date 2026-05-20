@@ -21,6 +21,7 @@ import { EPFL_LOCATIONS } from '../../../game/epfl-locations.js';
 import { createWeeklyChallengeOverlay } from '../overlays/weekly-challenge-overlay.js';
 import { createMinigamesOverlay } from '../overlays/minigames-overlay.js';
 import { createCtfLeaderboardOverlay } from '../overlays/ctf-leaderboard-overlay.js';
+import { createRoomListOverlay } from '../overlays/room-list-overlay.js';
 import { restoreSession } from '../services/auth-api.js';
 import { createNotificationScheduler } from '../services/notification-scheduler.js';
 import { createNotificationsOverlay } from '../overlays/notifications-overlay.js';
@@ -219,6 +220,7 @@ export function bootstrapApp() {
       startCtfPolling();
     } else {
       kingOverlay.closePanel();
+      roomListOverlay.close();
       roomPinsLayer.hide();
     }
   }
@@ -298,12 +300,14 @@ export function bootstrapApp() {
 
   // ── Bottom nav ────────────────────────────────────────────────────────────
   const ctfLeaderboardOverlay = createCtfLeaderboardOverlay();
+  const roomListOverlay = createRoomListOverlay();
 
   const bottomNav = createBottomNav({
     onCamera:          () => cameraController.open(),
     onChallenge:       () => challengeOverlay.openPanel(),
     onAdmin:           () => adminGalleryView.togglePanel(),
     onOpenLeaderboard: () => ctfLeaderboardOverlay.toggle(),
+    onOpenRoomList:    () => roomListOverlay.toggle(),
   });
 
   // ── Landing + session restore ─────────────────────────────────────────────
@@ -360,6 +364,7 @@ export function bootstrapApp() {
     notificationsOverlay.remove();
     mayorTimerOverlay.remove();
     bottomNav.remove();
+    roomListOverlay.remove();
     teamSelectOverlay.remove();
     landingOverlay.remove();
     ctfLeaderboardOverlay.remove();

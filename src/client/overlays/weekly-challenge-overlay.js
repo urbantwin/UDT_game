@@ -5,10 +5,10 @@ export function createWeeklyChallengeOverlay({
   container = document.body,
   onClaimRoom,
 } = {}) {
-  // ── Root : left panel fixe, pleine hauteur, glisse depuis la gauche ────────
+  // ── Root : left panel fixe, couvre les 2/3 inferieurs, glisse depuis la gauche ────────
   const root = document.createElement('div');
   root.style.cssText = `
-    position:fixed; left:0; top:0; bottom:0; z-index:1250;
+    position:fixed; left:0; top:33vh; bottom:0; z-index:1250;
     width:300px; max-width:90vw;
     transform:translateX(-100%);
     transition:transform 0.25s ease;
@@ -20,6 +20,7 @@ export function createWeeklyChallengeOverlay({
   panel.style.cssText = `
     background:rgba(15,15,15,0.96); color:#fff;
     padding:0; height:100%;
+    border-top-right-radius:12px;
     display:flex; flex-direction:column;
     box-shadow:4px 0 24px rgba(0,0,0,0.5);
     pointer-events:all;

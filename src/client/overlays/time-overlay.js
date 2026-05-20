@@ -5,13 +5,6 @@ function formatTime(date) {
   return date.toLocaleTimeString('en-GB', { hour12: false });
 }
 
-function formatCountdown(seconds) {
-  const clamped = Math.max(0, seconds);
-  const mins = Math.floor(clamped / 60);
-  const secs = clamped % 60;
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-}
-
 export function createTimeOverlay({ container = document.body } = {}) {
   const root = document.createElement('div');
   root.style.cssText = `
@@ -28,11 +21,7 @@ export function createTimeOverlay({ container = document.body } = {}) {
   root.appendChild(timeLabel);
 
   const timerLabel = document.createElement('span');
-  timerLabel.style.cssText = `
-    display:none; font-size:18px; font-weight:bold;
-    color:#fbbf24; letter-spacing:2px;
-  `;
-  root.appendChild(timerLabel);
+  timerLabel.style.display = 'none';
 
   const settingsBtn = document.createElement('button');
   settingsBtn.type = 'button';
@@ -63,7 +52,7 @@ export function createTimeOverlay({ container = document.body } = {}) {
     settingsBtn.style.background = 'rgb(20,20,20)';
   };
 
-  container.appendChild(root);
+  root.style.display = 'none';
   container.appendChild(settingsBtn);
 
   let timerRemaining = 0;
@@ -73,7 +62,6 @@ export function createTimeOverlay({ container = document.body } = {}) {
     timeLabel.textContent = formatTime(new Date());
     if (timerRemaining > 0) {
       timerRemaining--;
-      timerLabel.textContent = formatCountdown(timerRemaining);
       if (timerRemaining === 0) timerLabel.style.display = 'none';
     }
   }, 1000);
@@ -82,8 +70,8 @@ export function createTimeOverlay({ container = document.body } = {}) {
 
   function startTimer(seconds = 60) {
     timerRemaining = seconds;
-    timerLabel.textContent = formatCountdown(seconds);
-    timerLabel.style.display = 'inline';
+    // Timer intentionally hidden in UI.
+    timerLabel.style.display = 'none';
   }
 
   function remove() {

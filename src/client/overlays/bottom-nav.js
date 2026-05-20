@@ -1,15 +1,14 @@
-// Navigation flottante bas-gauche.
-// Deux modes : 'guessr' (EPFL Guessr) et 'king' (King of the Campus).
+// Floating navigation.
+// Modes: "guessr" and "king".
 
 export function createBottomNav({
   container = document.body,
   onCamera,
   onChallenge,
   onAdmin,
-  onOpenLeaderboard,  // ouvre le classement CTF
+  onOpenLeaderboard,
+  onOpenRoomList,
 } = {}) {
-
-  // ── Logo ──────────────────────────────────────────────────────────────────
   const logo = document.createElement('img');
   logo.src = '/logo_king.png';
   logo.alt = 'EPFL Guessr';
@@ -21,19 +20,20 @@ export function createBottomNav({
   `;
   container.appendChild(logo);
 
-  // Badge de mode affiché sous le logo
+  // Kept for compatibility; intentionally hidden by design.
   const modeBadge = document.createElement('div');
   modeBadge.style.cssText = `
     position:fixed; left:50px; top:78px; z-index:1100;
     font:700 9px system-ui,sans-serif; letter-spacing:0.08em;
     text-transform:uppercase; padding:2px 7px; border-radius:10px;
     pointer-events:none; transition:background 0.25s, color 0.25s;
+    display:none;
   `;
   const modeTextEl = document.createElement('span');
   modeBadge.appendChild(modeTextEl);
   container.appendChild(modeBadge);
 
-  // Pseudo + point équipe sous le badge de mode
+  // Kept for compatibility; intentionally hidden to avoid duplicate user display.
   const userBlock = document.createElement('div');
   userBlock.style.cssText = `
     position:fixed; left:50px; top:96px; z-index:1100;
@@ -48,49 +48,77 @@ export function createBottomNav({
   userBlock.appendChild(userNameEl);
   container.appendChild(userBlock);
 
-const leaderboardBtn = document.createElement('button');
-leaderboardBtn.style.cssText = `
-  position:fixed;
-  left:50px;
-  top:112px;
-  z-index:1100;
-  display:none;
-  background:linear-gradient(135deg, rgba(99,102,241,0.95), rgba(79,70,229,0.95));
-  color:#fff;
-  border:none;
-  border-radius:12px;
-  padding:9px 16px;
-  font:700 14px system-ui,sans-serif;
-  letter-spacing:0.02em;
-  cursor:pointer;
-  box-shadow:0 5px 14px rgba(79,70,229,0.35);
-  backdrop-filter:blur(8px);
-  transition:
-    transform 0.15s ease,
-    background 0.15s ease,
-    box-shadow 0.15s ease;
-`;
+  const leaderboardBtn = document.createElement('button');
+  leaderboardBtn.style.cssText = `
+    position:fixed;
+    left:50px;
+    top:88px;
+    z-index:1100;
+    display:none;
+    background:linear-gradient(135deg, rgba(99,102,241,0.95), rgba(79,70,229,0.95));
+    color:#fff;
+    border:none;
+    border-radius:12px;
+    padding:9px 16px;
+    font:700 14px system-ui,sans-serif;
+    letter-spacing:0.02em;
+    cursor:pointer;
+    box-shadow:0 5px 14px rgba(79,70,229,0.35);
+    backdrop-filter:blur(8px);
+    transition:
+      transform 0.15s ease,
+      background 0.15s ease,
+      box-shadow 0.15s ease;
+  `;
+  leaderboardBtn.textContent = 'Classements';
+  leaderboardBtn.addEventListener('mouseenter', () => {
+    leaderboardBtn.style.transform = 'scale(1.04)';
+    leaderboardBtn.style.boxShadow = '0 8px 20px rgba(79,70,229,0.45)';
+  });
+  leaderboardBtn.addEventListener('mouseleave', () => {
+    leaderboardBtn.style.transform = 'scale(1)';
+    leaderboardBtn.style.boxShadow = '0 5px 14px rgba(79,70,229,0.35)';
+  });
+  leaderboardBtn.addEventListener('click', () => onOpenLeaderboard?.());
+  container.appendChild(leaderboardBtn);
 
-leaderboardBtn.textContent = '📊 Classements';
+  const roomListBtn = document.createElement('button');
+  roomListBtn.style.cssText = `
+    position:fixed;
+    left:50px;
+    top:136px;
+    z-index:1100;
+    display:none;
+    background:linear-gradient(135deg, rgba(99,102,241,0.95), rgba(79,70,229,0.95));
+    color:#fff;
+    border:none;
+    border-radius:12px;
+    padding:9px 16px;
+    font:700 14px system-ui,sans-serif;
+    letter-spacing:0.02em;
+    cursor:pointer;
+    box-shadow:0 5px 14px rgba(79,70,229,0.35);
+    backdrop-filter:blur(8px);
+    transition:
+      transform 0.15s ease,
+      background 0.15s ease,
+      box-shadow 0.15s ease;
+  `;
+  roomListBtn.textContent = 'Liste des salles';
+  roomListBtn.addEventListener('mouseenter', () => {
+    roomListBtn.style.transform = 'scale(1.04)';
+    roomListBtn.style.boxShadow = '0 8px 20px rgba(79,70,229,0.45)';
+  });
+  roomListBtn.addEventListener('mouseleave', () => {
+    roomListBtn.style.transform = 'scale(1)';
+    roomListBtn.style.boxShadow = '0 5px 14px rgba(79,70,229,0.35)';
+  });
+  roomListBtn.addEventListener('click', () => onOpenRoomList?.());
+  container.appendChild(roomListBtn);
 
-leaderboardBtn.addEventListener('mouseenter', () => {
-  leaderboardBtn.style.transform = 'scale(1.04)';
-  leaderboardBtn.style.boxShadow = '0 8px 20px rgba(79,70,229,0.45)';
-});
-
-leaderboardBtn.addEventListener('mouseleave', () => {
-  leaderboardBtn.style.transform = 'scale(1)';
-  leaderboardBtn.style.boxShadow = '0 5px 14px rgba(79,70,229,0.35)';
-});
-
-leaderboardBtn.addEventListener('click', () => onOpenLeaderboard?.());
-
-container.appendChild(leaderboardBtn);
-
-  // Compteur de salles — centré en haut
   const roomCountEl = document.createElement('div');
   roomCountEl.style.cssText = `
-    position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:1100;
+    position:fixed; top:14px; right:72px; z-index:1100;
     display:none;
     background:rgba(99,102,241,0.75); color:#fff;
     font:700 11px system-ui,sans-serif; letter-spacing:0.04em;
@@ -100,7 +128,6 @@ container.appendChild(leaderboardBtn);
   `;
   container.appendChild(roomCountEl);
 
-  // ── Groupe d'icônes ───────────────────────────────────────────────────────
   const iconGroup = document.createElement('div');
   iconGroup.style.cssText = `
     position:fixed; left:14px; bottom:64px; z-index:1100;
@@ -124,67 +151,57 @@ container.appendChild(leaderboardBtn);
       ${extraCss}
     `;
     btn.textContent = icon;
-    btn.onmouseenter  = () => btn.style.background = color;
-    btn.onmouseleave  = () => btn.style.background = btn._baseBg ?? 'rgba(10,10,10,0.88)';
-    btn.onmousedown   = () => btn.style.transform = 'scale(0.90)';
-    btn.onmouseup     = () => btn.style.transform = 'scale(1)';
-    btn.ontouchstart  = () => { btn.style.transform = 'scale(0.90)'; btn.style.background = color; };
-    btn.ontouchend    = () => { btn.style.transform = 'scale(1)'; btn.style.background = btn._baseBg ?? 'rgba(10,10,10,0.88)'; };
-    btn._hoverColor = color;
+    btn.onmouseenter = () => { btn.style.background = color; };
+    btn.onmouseleave = () => { btn.style.background = btn._baseBg ?? 'rgba(10,10,10,0.88)'; };
+    btn.onmousedown = () => { btn.style.transform = 'scale(0.90)'; };
+    btn.onmouseup = () => { btn.style.transform = 'scale(1)'; };
+    btn.ontouchstart = () => { btn.style.transform = 'scale(0.90)'; btn.style.background = color; };
+    btn.ontouchend = () => { btn.style.transform = 'scale(1)'; btn.style.background = btn._baseBg ?? 'rgba(10,10,10,0.88)'; };
     return btn;
   }
 
-  // 🎯 Challenge (Guessr uniquement)
   const challengeBtn = makeIconBtn('🎯', 'rgb(255,255,255)', 'Challenge');
   challengeBtn.addEventListener('click', () => onChallenge?.());
   iconGroup.appendChild(challengeBtn);
 
-  // 📷 Caméra
-  const cameraBtn = makeIconBtn('📷', 'rgb(255,255,255)', 'Caméra');
-  cameraBtn.style.width  = '52px';
+  const cameraBtn = makeIconBtn('📷', 'rgb(255,255,255)', 'Camera');
+  cameraBtn.style.width = '52px';
   cameraBtn.style.height = '52px';
   cameraBtn.style.fontSize = '24px';
   cameraBtn.style.background = 'rgba(185,28,28,0.75)';
   cameraBtn.style.border = '2px solid rgba(239,68,68,0.5)';
   cameraBtn._baseBg = 'rgba(185,28,28,0.75)';
-  cameraBtn.onmouseenter  = () => cameraBtn.style.background = 'rgba(239,68,68,0.9)';
-  cameraBtn.onmouseleave  = () => cameraBtn.style.background = 'rgba(185,28,28,0.75)';
+  cameraBtn.onmouseenter = () => { cameraBtn.style.background = 'rgba(239,68,68,0.9)'; };
+  cameraBtn.onmouseleave = () => { cameraBtn.style.background = 'rgba(185,28,28,0.75)'; };
   cameraBtn.addEventListener('click', () => onCamera?.());
   iconGroup.appendChild(cameraBtn);
 
-  // 🔧 Admin
   const adminBtn = makeIconBtn('🔧', 'rgba(245,158,11,0.35)', 'Admin');
   adminBtn.style.display = 'none';
   adminBtn.addEventListener('click', () => onAdmin?.());
   iconGroup.appendChild(adminBtn);
 
-  // ── État du mode ──────────────────────────────────────────────────────────
   let currentMode = 'guessr';
 
-  // ── API publique ──────────────────────────────────────────────────────────
-  
   function setMode(mode) {
     currentMode = mode;
     if (mode === 'king') {
       challengeBtn.style.display = 'none';
       cameraBtn.style.display = 'none';
-      modeTextEl.textContent = '👑 King of Campus';
-      modeBadge.style.background = 'rgba(99,102,241,0.7)';
-      modeBadge.style.color = '#fff';
+      modeTextEl.textContent = '';
     } else {
       challengeBtn.style.display = 'flex';
       cameraBtn.style.display = 'flex';
-      modeTextEl.textContent = '🎮 EPFL Guessr';
-      modeBadge.style.background = 'rgba(30,30,30,0.75)';
-      modeBadge.style.color = 'rgba(255,255,255,0.7)';
+      modeTextEl.textContent = '';
       roomCountEl.style.display = 'none';
     }
   }
 
   function setLoggedIn(loggedIn) {
-    modeBadge.style.display = loggedIn ? 'block' : 'none';
-    userBlock.style.display = loggedIn ? 'flex' : 'none';
+    modeBadge.style.display = 'none';
+    userBlock.style.display = 'none';
     leaderboardBtn.style.display = loggedIn && currentMode === 'king' ? 'block' : 'none';
+    roomListBtn.style.display = loggedIn && currentMode === 'king' ? 'block' : 'none';
   }
 
   function setAdminVisible(visible) {
@@ -204,11 +221,13 @@ container.appendChild(leaderboardBtn);
   function setRoomCount(controlled, total) {
     if (controlled === null || controlled === undefined || currentMode !== 'king') {
       roomCountEl.style.display = 'none';
-    } else {
-      roomCountEl.textContent = `${controlled} / ${total} salles`;
-      roomCountEl.style.display = 'block';
-      leaderboardBtn.style.display = 'block';
+      roomListBtn.style.display = 'none';
+      return;
     }
+    roomCountEl.textContent = `${controlled} / ${total} salles`;
+    roomCountEl.style.display = 'block';
+    leaderboardBtn.style.display = 'block';
+    roomListBtn.style.display = 'block';
   }
 
   function remove() {
@@ -217,12 +236,10 @@ container.appendChild(leaderboardBtn);
     modeBadge.remove();
     userBlock.remove();
     leaderboardBtn.remove();
+    roomListBtn.remove();
     roomCountEl.remove();
   }
 
-  // Initialiser le badge en mode guessr
   setMode('guessr');
-  modeBadge.style.display = 'none';
-
   return { setMode, setLoggedIn, setAdminVisible, setUser, setRoomCount, remove };
 }
