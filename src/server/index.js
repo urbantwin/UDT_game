@@ -79,7 +79,7 @@ app.post('/api/auth/register', async (req, res) => {
     res.status(400).json({ error: 'Invalid username or password format.' });
     return;
   }
-  if (username.trim().toLowerCase() === 'dev') {
+  if (username.trim().toLowerCase() === 'admin') {
     res.status(403).json({ error: 'Reserved username.' });
     return;
   }
@@ -157,7 +157,7 @@ app.post('/api/auth/logout', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-// ---- ADMIN (dev-only) ----
+// ---- ADMIN (admin-only) ----
 app.get('/api/admin/submissions', requireAuth, requireDevAccess, async (_req, res) => {
   try {
     const db = await getDb();

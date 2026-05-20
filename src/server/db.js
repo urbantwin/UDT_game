@@ -250,7 +250,7 @@ async function initializeSchema(db) {
     awardedAt  BIGINT  NOT NULL
   )`);
 
-  await ensureDevAccount(db);
+  await ensureAdminAccount(db);
 }
 
 // -- Score helpers -------------------------------------------------------------
@@ -263,11 +263,16 @@ export async function updateScore(db, userId, delta) {
   );
 }
 
-async function ensureDevAccount(db) {
-  const username = 'dev';
+async function ensureAdminAccount(db) {
+  const username = 'admin';
   const passwordHash = await hashPassword('12345678');
+  const legacyRows = await all(db, 'SELECT id FROM users WHERE username = $1', ['dev']);
   const rows = await all(db, 'SELECT id FROM users WHERE username = $1', [username]);
-  if (rows.length === 0) {
+  if (rows.length === 0 && legacyRows.length > 0) {
+    await run(db, 'UPDATE users SET username = $1 WHERE username = $2', [username, 'dev']);
+  }
+  const ensuredRows = await all(db, 'SELECT id FROM users WHERE username = $1', [username]);
+  if (ensuredRows.length === 0) {
     await run(
       db,
       'INSERT INTO users (username, passwordHash, createdAt) VALUES ($1, $2, $3)',

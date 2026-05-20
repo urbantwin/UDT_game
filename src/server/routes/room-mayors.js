@@ -151,7 +151,7 @@ export default function createRoomMayorsRouter({ broadcast }) {
       res.status(400).json({ error: 'Coordonnees GPS invalides.' });
       return;
     }
-    const isAdmin = req.user.username === 'dev';
+    const isAdmin = req.user.username === 'admin';
     if (!isAdmin) {
       const dist = haversineMeters(epflLoc.lat, epflLoc.lng, playerLat, playerLon);
       if (dist > 25) {
@@ -292,7 +292,7 @@ export default function createRoomMayorsRouter({ broadcast }) {
         throw e;
       }
       const locLabel = EPFL_LOCATIONS.find(l => l.id === mayor.locationId)?.label ?? mayor.locationId;
-      const admin = (await all(db, "SELECT id FROM users WHERE username = 'dev' LIMIT 1"))[0];
+      const admin = (await all(db, "SELECT id FROM users WHERE username = 'admin' LIMIT 1"))[0];
       if (admin) {
         await run(db,
           `INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)`,

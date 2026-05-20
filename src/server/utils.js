@@ -11,7 +11,7 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const SUPABASE_STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'photos';
 
 export function requireDevAccess(req, res, next) {
-  if (req.user?.username !== 'dev') {
+  if (req.user?.username !== 'admin') {
     res.status(403).json({ error: 'Admin access denied.' });
     return;
   }
