@@ -4,6 +4,7 @@ import { hashPassword } from './auth.js';
 const { Pool } = pg;
 
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 let _db = null;
 let _initPromise = null;
@@ -265,6 +266,9 @@ export async function updateScore(db, userId, delta) {
 
 async function ensureAdminAccount(db) {
   const username = 'admin';
+  if (!ADMIN_PASSWORD) {
+    throw new Error('Missing ADMIN_PASSWORD in environment. Refusing to create/update admin account with an unsafe default password.');
+  }
   const passwordHash = await hashPassword(ADMIN_PASSWORD);
   const legacyRows = await all(db, 'SELECT id FROM users WHERE username = $1', ['dev']);
   const rows = await all(db, 'SELECT id FROM users WHERE username = $1', [username]);
