@@ -604,7 +604,9 @@ export function createAdminGalleryView({ container = document.body, map = null, 
     targetBox.appendChild(statusLine);
     row.appendChild(targetBox);
 
-    row.appendChild(metaLine(`👤 Signalé par : ${item.reporterUsername}`, 0.7));
+    const reporters = Array.isArray(item.reporterUsernames) ? item.reporterUsernames.join(', ') : 'inconnu';
+    row.appendChild(metaLine(`👥 Signalements : ${item.reportsCount ?? 1}`, 0.7));
+    row.appendChild(metaLine(`👤 Reporters : ${reporters}`, 0.7));
 
     if (item.photoDataUrl) {
       const photoLabel = document.createElement('div');
@@ -622,8 +624,8 @@ export function createAdminGalleryView({ container = document.body, map = null, 
 
     const actionsRow = document.createElement('div');
     actionsRow.style.cssText = 'display:flex; gap:6px; align-items:center; flex-wrap:wrap;';
-    const validateBtn = makeBtn('✓ Photo invalide — Pénaliser maire', '#86efac');
-    const dismissBtn  = makeBtn('✕ Signalement abusif — Malus signaleur', '#fca5a5');
+    const validateBtn = makeBtn('✓ Photo invalide — -10 auteur', '#86efac');
+    const dismissBtn  = makeBtn('✕ Signalement injustifié', '#fca5a5');
     const statusEl    = document.createElement('div');
     statusEl.style.cssText = 'font-size:10px; opacity:0.8; width:100%;';
 
@@ -632,7 +634,7 @@ export function createAdminGalleryView({ container = document.body, map = null, 
       statusEl.textContent = '…';
       try {
         await reviewReport(item.reportId, 'validate');
-        statusEl.textContent = `✓ Maire pénalisé${item.mayorActive ? ', salle libérée' : ''}. Reporter notifié.`;
+        statusEl.textContent = `✓ Auteur pénalisé (-10)${item.mayorActive ? ', salle libérée' : ''}.`;
         setTimeout(() => loadReportsView(), 1000);
       } catch (err) {
         statusEl.textContent = err.message || 'Erreur';
@@ -645,7 +647,7 @@ export function createAdminGalleryView({ container = document.body, map = null, 
       statusEl.textContent = '…';
       try {
         await reviewReport(item.reportId, 'dismiss');
-        statusEl.textContent = '✕ Signalement rejeté. Malus -30min appliqué au signaleur.';
+        statusEl.textContent = '✕ Signalement injustifié. Aucun malus reporteur.';
         setTimeout(() => loadReportsView(), 1000);
       } catch (err) {
         statusEl.textContent = err.message || 'Erreur';

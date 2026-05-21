@@ -103,6 +103,15 @@ export async function uploadPhotoToStorage(
   return { photoUrl, storagePath };
 }
 
+export async function deletePhotoFromStorage(storagePath) {
+  if (!storagePath) return;
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.storage
+    .from(SUPABASE_STORAGE_BUCKET)
+    .remove([storagePath]);
+  if (error) throw new Error(`Storage delete failed: ${error.message}`);
+}
+
 export async function expireDeadlinedMayors(db) {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const expired = await all(db,
@@ -115,7 +124,7 @@ export async function expireDeadlinedMayors(db) {
     const elapsed = nowSeconds - m.claimedAt;
     await run(db,
       `INSERT INTO room_mayor_totals (locationId, userId, totalSeconds) VALUES (?, ?, ?)
-       ON CONFLICT(locationId, userId) DO UPDATE SET totalSeconds = totalSeconds + excluded.totalSeconds`,
+       ON CONFLICT(locationId, userId) DO UPDATE SET totalSeconds = room_mayor_totals.totalSeconds + excluded.totalSeconds`,
       [m.locationId, m.userId, elapsed]
     );
     const locLabel = EPFL_LOCATIONS.find(l => l.id === m.locationId)?.label ?? m.locationId;

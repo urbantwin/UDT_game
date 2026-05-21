@@ -8,6 +8,7 @@ import {
   requireDevAccess,
   haversineMeters,
   uploadPhotoToStorage,
+  deletePhotoFromStorage,
   expireDeadlinedMayors,
   buildLabelResolver,
 } from '../utils.js';
@@ -219,7 +220,7 @@ export default function createRoomMayorsRouter({ broadcast }) {
         const elapsed = nowSeconds - activeMayor.claimedAt;
         await run(db,
           `INSERT INTO room_mayor_totals (locationId, userId, totalSeconds) VALUES (?, ?, ?)
-           ON CONFLICT(locationId, userId) DO UPDATE SET totalSeconds = totalSeconds + excluded.totalSeconds`,
+           ON CONFLICT(locationId, userId) DO UPDATE SET totalSeconds = room_mayor_totals.totalSeconds + excluded.totalSeconds`,
           [locationId, activeMayor.userId, elapsed]
         );
       }
@@ -365,18 +366,23 @@ export default function createRoomMayorsRouter({ broadcast }) {
       const db = await getDb();
       const getLabel = await buildLabelResolver(db);
       const rows = await all(db,
-        `SELECT rmr.id AS reportId, rmr.mayorId, rmr.reportedBy, rmr.reportedAt,
-                rm.locationId, rm.active AS mayorActive,
-                u_mayor.username AS mayorUsername,
-                u_reporter.username AS reporterUsername,
-                COALESCE(p.photoUrl, p.dataUrl) AS photoDataUrl
+        `SELECT
+            MIN(rmr.id) AS reportId,
+            rmr.mayorId,
+            MAX(rmr.reportedAt) AS reportedAt,
+            COUNT(*)::int AS reportsCount,
+            ARRAY_AGG(DISTINCT u_reporter.username ORDER BY u_reporter.username) AS reporterUsernames,
+            rm.locationId, rm.active AS mayorActive,
+            u_mayor.username AS mayorUsername,
+            COALESCE(p.photoUrl, p.dataUrl) AS photoDataUrl
          FROM room_mayor_reports rmr
          JOIN room_mayors rm ON rm.id = rmr.mayorId
          JOIN users u_mayor ON u_mayor.id = rm.userId
          JOIN users u_reporter ON u_reporter.id = rmr.reportedBy
          LEFT JOIN photos p ON p.id = rm.photoId
          WHERE rmr.status = 'pending'
-         ORDER BY rmr.reportedAt DESC`,
+         GROUP BY rmr.mayorId, rm.locationId, rm.active, u_mayor.username, COALESCE(p.photoUrl, p.dataUrl)
+         ORDER BY MAX(rmr.reportedAt) DESC`,
         []
       );
       res.json(rows.map(r => ({ ...r, locationLabel: getLabel(r.locationId) })));
@@ -384,7 +390,6 @@ export default function createRoomMayorsRouter({ broadcast }) {
       res.status(500).json({ error: err.message });
     }
   });
-
   // POST /api/admin/room-mayors/reports/:reportId/review
   router.post('/api/admin/room-mayors/reports/:reportId/review', requireAuth, requireDevAccess, async (req, res) => {
     const reportId = parseInt(req.params.reportId, 10);
@@ -399,65 +404,88 @@ export default function createRoomMayorsRouter({ broadcast }) {
       const db = await getDb();
       const getLabel = await buildLabelResolver(db);
       const report = (await all(db,
-        `SELECT rmr.id, rmr.mayorId, rmr.reportedBy, rm.locationId,
-                rm.userId AS mayorUserId, rm.active AS mayorActive
+        `SELECT rmr.id, rmr.mayorId, rm.locationId, rm.photoId,
+                rm.userId AS mayorUserId, rm.active AS mayorActive,
+                p.storagePath AS photoStoragePath
          FROM room_mayor_reports rmr
          JOIN room_mayors rm ON rm.id = rmr.mayorId
+         LEFT JOIN photos p ON p.id = rm.photoId
          WHERE rmr.id = ? AND rmr.status = 'pending'`,
         [reportId]
       ))[0];
       if (!report) { res.status(404).json({ error: 'Signalement introuvable ou deja traite.' }); return; }
       const locLabel = getLabel(report.locationId);
+      const pendingReporters = await all(db,
+        `SELECT DISTINCT reportedBy FROM room_mayor_reports
+         WHERE mayorId = ? AND status = 'pending'`,
+        [report.mayorId]
+      );
+      const pendingReporterIds = pendingReporters.map((r) => r.reportedBy).filter(Boolean);
 
       if (decision === 'validate') {
-        await run(db, `UPDATE room_mayor_reports SET status = 'resolved_approved' WHERE id = ?`, [reportId]);
+        await run(db,
+          `UPDATE room_mayor_reports
+           SET status = 'resolved_approved'
+           WHERE mayorId = ? AND status = 'pending'`,
+          [report.mayorId]
+        );
         if (report.mayorActive) {
           await run(db, 'UPDATE room_mayors SET active = 0 WHERE id = ?', [report.mayorId]);
         }
-        await run(db,
-          'UPDATE room_mayor_totals SET totalSeconds = 0 WHERE locationId = ? AND userId = ?',
-          [report.locationId, report.mayorUserId]
-        );
-        // Malus équipe pour fraude
-        const fraudUser = (await all(db, 'SELECT teamId FROM users WHERE id = ?', [report.mayorUserId]))[0];
-        if (fraudUser?.teamId) {
+
+        if (report.photoId) {
           await run(db,
-            `INSERT INTO ctf_team_scores (teamId, points, reason, locationId, awardedAt) VALUES (?, ?, 'fraud_penalty', ?, ?)`,
-            [fraudUser.teamId, CTF_SCORING.fraudPenalty, report.locationId, Date.now()]
+            `UPDATE photos
+             SET status = 'invalid', photoUrl = NULL, dataUrl = NULL, storagePath = NULL
+             WHERE id = ?`,
+            [report.photoId]
           );
+          if (report.photoStoragePath) {
+            try {
+              await deletePhotoFromStorage(report.photoStoragePath);
+            } catch (err) {
+              console.error('[admin-reports] failed to delete storage object:', err.message);
+            }
+          }
         }
+
+        await updateScore(db, report.mayorUserId, -10);
+
         await run(db,
           'INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)',
           [report.mayorUserId, 'photo_rejected',
-           `Photo incorrecte — ton image pour "${locLabel}" a ete signalee et jugee invalide par l'admin. Ton chrono est remis a 0.${report.mayorActive ? ' Tu perds ton titre de maire.' : ''} Malus : ${Math.abs(CTF_SCORING.fraudPenalty)} pts pour ton équipe.`,
+           `Photo incorrecte - ton image pour "${locLabel}" a ete jugee invalide par l'admin.${report.mayorActive ? ' Tu perds ton titre de maire.' : ''} Malus : -10 points.`,
            Date.now()]
         );
-        await run(db,
-          'INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)',
-          [report.reportedBy, 'report_validated',
-           `Ton signalement pour "${locLabel}" a ete valide par l'admin. Merci !`,
-           Date.now()]
-        );
+        for (const reporterId of pendingReporterIds) {
+          await run(db,
+            'INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)',
+            [reporterId, 'report_validated',
+             `Ton signalement pour "${locLabel}" a ete valide par l'admin. Merci !`,
+             Date.now()]
+          );
+        }
       } else {
-        await run(db, `UPDATE room_mayor_reports SET status = 'resolved_rejected' WHERE id = ?`, [reportId]);
-        await run(db,W
-          `INSERT INTO room_mayor_totals (locationId, userId, totalSeconds) VALUES (?, ?, 0)
-          ON CONFLICT(locationId, userId) DO UPDATE SET totalSeconds = GREATEST(0, room_mayor_totals.totalSeconds - 1800)`
-          [report.locationId, report.reportedBy]
-        );
         await run(db,
-          'INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)',
-          [report.reportedBy, 'false_report',
-           `Ton signalement pour "${locLabel}" a ete rejete — la photo etait valide. Malus : -30min sur ton chrono de cette salle.`,
-           Date.now()]
+          `UPDATE room_mayor_reports
+           SET status = 'resolved_rejected'
+           WHERE mayorId = ? AND status = 'pending'`,
+          [report.mayorId]
         );
+        for (const reporterId of pendingReporterIds) {
+          await run(db,
+            'INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)',
+            [reporterId, 'report_rejected',
+             `Ton signalement pour "${locLabel}" a ete juge injustifie par l'admin.`,
+             Date.now()]
+          );
+        }
       }
       res.json({ decision, reportId, locationId: report.locationId });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
   });
-
   // POST /api/admin/room-mayors/:mayorId/review
   router.post('/api/admin/room-mayors/:mayorId/review', requireAuth, requireDevAccess, async (req, res) => {
     const mayorId = parseInt(req.params.mayorId, 10);
@@ -559,3 +587,5 @@ export default function createRoomMayorsRouter({ broadcast }) {
 
   return router;
 }
+
+
