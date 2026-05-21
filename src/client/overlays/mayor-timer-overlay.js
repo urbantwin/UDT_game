@@ -7,50 +7,77 @@ export function createMayorTimerOverlay({ container = document.body } = {}) {
   el.style.cssText = `
     position:fixed; left:50px; top:100px; z-index:1100;
     display:none;
-    background:rgba(99,102,241,0.82); color:#fff;
-    font:700 10px system-ui,sans-serif; letter-spacing:0.04em;
-    padding:3px 10px; border-radius:10px;
+    background:rgba(17,24,39,0.88); color:#fff;
+    font:600 10px system-ui,sans-serif; letter-spacing:0.03em;
+    padding:5px 11px; border-radius:10px; line-height:1.7;
     pointer-events:none;
-    box-shadow:0 2px 8px rgba(0,0,0,0.35);
-    transition:opacity 0.3s;
+    box-shadow:0 2px 8px rgba(0,0,0,0.4);
+    border:1px solid rgba(255,255,255,0.08);
   `;
   container.appendChild(el);
 
   let tickId    = null;
   let refreshId = null;
-  let baseSeconds = 0;
-  let startTime   = null;
-  let roomLabel   = '';
-  let loggedIn    = false;
+  let loggedIn  = false;
 
-  function fmt(total) {
-    const h = Math.floor(total / 3600);
-    const m = Math.floor((total % 3600) / 60);
-    const s = total % 60;
+  let deadlineEpoch    = null; // Unix seconds — quand le statut de maire est perdu
+  let renewalEpoch     = null; // Unix seconds — quand le renouvellement est possible
+  let roomLabel        = '';
+
+  function fmt(secs) {
+    if (secs <= 0) return '—';
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
     const ss = String(s).padStart(2, '0');
-    if (h > 0) return `${h}h ${String(m).padStart(2,'0')}min ${ss}s`;
+    if (h > 0) return `${h}h ${String(m).padStart(2, '0')}min`;
     if (m > 0) return `${m}min ${ss}s`;
     return `${ss}s`;
   }
 
   function tick() {
-    const elapsed = Math.floor((Date.now() - startTime) / 1000);
-    el.textContent = `▶ ${roomLabel} — ${fmt(baseSeconds + elapsed)}`;
+    const now = Math.floor(Date.now() / 1000);
+
+    const lines = [];
+
+    if (deadlineEpoch !== null) {
+      const remaining = deadlineEpoch - now;
+      const urgent = remaining > 0 && remaining < 3600;
+      const color  = remaining <= 0 ? '#f87171' : urgent ? '#fbbf24' : '#86efac';
+      const label  = remaining <= 0 ? 'Statut de maire perdu' : `Perte du statut de maire dans : <b style="color:${color}">${fmt(remaining)}</b>`;
+      lines.push(label);
+    }
+
+    if (renewalEpoch !== null) {
+      const remaining = renewalEpoch - now;
+      if (remaining > 0) {
+        lines.push(`Renouvellement possible dans : <b style="color:#93c5fd">${fmt(remaining)}</b>`);
+      }
+    }
+
+    if (lines.length === 0) {
+      el.style.display = 'none';
+      return;
+    }
+
+    el.innerHTML = `<div style="opacity:0.6;margin-bottom:1px;">👑 ${roomLabel}</div>${lines.join('<br>')}`;
+    el.style.display = 'block';
   }
 
-  function startCounting({ label, totalSeconds }) {
-    stopCounting();
-    roomLabel   = label;
-    baseSeconds = totalSeconds;
-    startTime   = Date.now();
-    // Widget caché — les chrono par salle sont dans le menu réglages
+  function startTimer({ label, renewalDeadline, renewalAllowedAt }) {
+    stopTimer();
+    roomLabel     = label;
+    deadlineEpoch = renewalDeadline   ?? null;
+    renewalEpoch  = renewalAllowedAt  ?? null;
     tick();
     tickId = setInterval(tick, 1000);
   }
 
-  function stopCounting() {
+  function stopTimer() {
     if (tickId) { clearInterval(tickId); tickId = null; }
     el.style.display = 'none';
+    deadlineEpoch = null;
+    renewalEpoch  = null;
   }
 
   function stopRefresh() {
@@ -62,15 +89,16 @@ export function createMayorTimerOverlay({ container = document.body } = {}) {
     try {
       const stats = await getMyKingStats();
       if (stats?.lastRoom?.isMayor) {
-        startCounting({
-          label: stats.lastRoom.locationLabel,
-          totalSeconds: stats.lastRoom.myTotalSeconds,
+        startTimer({
+          label:           stats.lastRoom.locationLabel,
+          renewalDeadline: stats.lastRoom.renewalDeadline,
+          renewalAllowedAt: stats.lastRoom.renewalAllowedAt,
         });
       } else {
-        stopCounting();
+        stopTimer();
       }
     } catch {
-      stopCounting();
+      stopTimer();
     }
   }
 
@@ -81,7 +109,7 @@ export function createMayorTimerOverlay({ container = document.body } = {}) {
       stopRefresh();
       refreshId = setInterval(loadAndApply, REFRESH_INTERVAL_MS);
     } else {
-      stopCounting();
+      stopTimer();
       stopRefresh();
     }
   }
@@ -91,7 +119,7 @@ export function createMayorTimerOverlay({ container = document.body } = {}) {
   }
 
   function remove() {
-    stopCounting();
+    stopTimer();
     stopRefresh();
     el.remove();
   }

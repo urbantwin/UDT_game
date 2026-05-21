@@ -54,7 +54,13 @@ export function createMapView({ containerId, config }) {
       onEachFeature(feature, layer) {
         const label = feature.properties.label_new;
         if (label) {
-          layer.bindTooltip(label, { permanent: true, direction: 'center', className: 'room-label' });
+          const locId = labelToId(label);
+          const room = ctfRooms.find(r => r.locationId === locId);
+          const tc = room?.teamColor;
+          const html = tc
+            ? `<span style="color:#fff;background:${tc};padding:1px 5px;border-radius:3px;">${label}</span>`
+            : label;
+          layer.bindTooltip(html, { permanent: true, direction: 'center', className: 'room-label' });
         }
         const locId = labelToId(label);
         if (locId && GAME_LOCATION_IDS.has(locId) && roomClickFn) {
