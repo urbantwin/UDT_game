@@ -152,7 +152,7 @@ export function createLandingOverlay({ onGameChosen, onUserLoaded, onLogout } = 
       display:flex; gap:12px; justify-content:center; margin-bottom:8px;
     `;
 
-    const cardGuessr = makeLogoCard('/logo.jpeg', 'EPFL Guessr', '#0ea5e9');
+    const cardGuessr = makeLogoCard('/logo.png', 'EPFL Guessr', '#0ea5e9');
     const cardKing   = makeLogoCard('/logo_king.png', 'King of Campus', '#6366f1');
 
 //    cardGuessr.addEventListener('click', () => { onGameChosen?.('guessr', user); hide(); });
