@@ -232,7 +232,10 @@ export function createCtfLeaderboardOverlay({ container = document.body } = {}) 
         block.appendChild(empty);
       } else {
         const list = document.createElement('div');
-        list.style.cssText = 'display:flex; flex-direction:column;';
+        list.style.cssText = `
+          display:flex; flex-direction:column;
+          max-height:180px; overflow-y:auto;
+        `;
         team.members.forEach(m => {
           const item = document.createElement('div');
           item.style.cssText = `

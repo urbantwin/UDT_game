@@ -47,57 +47,95 @@ async function computeControllingTeam(db, locationId) {
   return rows[0].teamId;
 }
 
-// Award points to controlled rooms. Called every hour (guarded by lastHourlyAwardedHour).
+// Award per-mayor points. Called every minute.
+// Each eligible mayor is scored independently based on their claimedAt/lastScoredAt.
 async function runHourlyScoring(db, broadcast) {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const INTERVAL = 3600;
+
+  const eligibleMayors = await all(db,
+    `SELECT rm.id AS mayorId, rm.userId, rm.locationId, rm.claimedAt,
+            rm.lastScoredAt, u.teamId
+     FROM room_mayors rm
+     JOIN users u ON u.id = rm.userId
+     WHERE rm.active = 1
+       AND u.teamId IS NOT NULL
+       AND (
+         (rm.lastScoredAt IS NULL     AND $1 >= rm.claimedAt    + $2)
+         OR
+         (rm.lastScoredAt IS NOT NULL AND $1 >= rm.lastScoredAt + $2)
+       )`,
+    [nowSeconds, INTERVAL]
+  );
+
+  if (eligibleMayors.length === 0) return;
+
+  for (const { mayorId, userId, locationId, teamId } of eligibleMayors) {
+    const awardedAt = Date.now();
+    await run(db,
+      `INSERT INTO ctf_team_scores (teamId, points, reason, locationId, awardedAt)
+       VALUES (?, ?, 'hourly_control', ?, ?)`,
+      [teamId, CTF_SCORING.pointsPerRoomPerHour, locationId, awardedAt]
+    );
+    await run(db,
+      `INSERT INTO ctf_player_scores (userId, points, reason, locationId, awardedAt)
+       VALUES (?, ?, 'room_control', ?, ?)`,
+      [userId, CTF_SCORING.pointsPerRoomPerHour, locationId, awardedAt]
+    );
+    await run(db,
+      `UPDATE room_mayors SET lastScoredAt = ? WHERE id = ?`,
+      [nowSeconds, mayorId]
+    );
+  }
+
+  broadcast({ type: 'ctf_update' });
+}
+
+// Domination bonus: global snapshot of all rooms, once per wall-clock hour.
+// Exactly the same logic as before — guarded by lastHourlyAwardedHour.
+async function runDominationBonus(db, broadcast) {
   const { hour } = getZurichDateHour();
   if (hour === lastHourlyAwardedHour) return;
   lastHourlyAwardedHour = hour;
 
   const now = Date.now();
-  const roomScores = {};
+  const roomScores = {};   // teamId -> rooms controlled
   const mayorsByTeam = {}; // teamId -> Set<userId>
 
   for (const loc of EPFL_LOCATIONS) {
     const teamId = await computeControllingTeam(db, loc.id);
     if (!teamId) continue;
-    await run(db,
-      `INSERT INTO ctf_team_scores (teamId, points, reason, locationId, awardedAt) VALUES (?, ?, 'hourly_control', ?, ?)`,
-      [teamId, CTF_SCORING.pointsPerRoomPerHour, loc.id, now]
-    );
+
     roomScores[teamId] = (roomScores[teamId] ?? 0) + 1;
 
     const mayor = (await all(db,
-      'SELECT userId FROM room_mayors WHERE locationId = ? AND active = 1 LIMIT 1', [loc.id]
+      'SELECT userId FROM room_mayors WHERE locationId = ? AND active = 1 LIMIT 1',
+      [loc.id]
     ))[0];
     if (mayor) {
-      await run(db,
-        `INSERT INTO ctf_player_scores (userId, points, reason, locationId, awardedAt) VALUES (?, ?, 'room_control', ?, ?)`,
-        [mayor.userId, CTF_SCORING.pointsPerRoomPerHour, loc.id, now]
-      );
       if (!mayorsByTeam[teamId]) mayorsByTeam[teamId] = new Set();
       mayorsByTeam[teamId].add(mayor.userId);
     }
   }
 
   const entries = Object.entries(roomScores);
-  if (entries.length > 0) {
-    entries.sort((a, b) => b[1] - a[1]);
-    if (entries.length === 1 || entries[0][1] > entries[1][1]) {
-      const winTeam = entries[0][0];
-      await run(db,
-        `INSERT INTO ctf_team_scores (teamId, points, reason, locationId, awardedAt) VALUES (?, ?, 'domination', NULL, ?)`,
-        [winTeam, CTF_SCORING.dominationBonus, now]
-      );
-      for (const userId of (mayorsByTeam[winTeam] ?? [])) {
-        await run(db,
-          `INSERT INTO ctf_player_scores (userId, points, reason, locationId, awardedAt) VALUES (?, 2, 'domination_contribution', NULL, ?)`,
-          [userId, now]
-        );
-      }
-    }
-  }
+  if (entries.length === 0) return;
 
-  if (Object.keys(roomScores).length > 0) {
+  entries.sort((a, b) => b[1] - a[1]);
+  if (entries.length === 1 || entries[0][1] > entries[1][1]) {
+    const winTeam = entries[0][0];
+    await run(db,
+      `INSERT INTO ctf_team_scores (teamId, points, reason, locationId, awardedAt)
+       VALUES (?, ?, 'domination', NULL, ?)`,
+      [winTeam, CTF_SCORING.dominationBonus, now]
+    );
+    for (const uid of (mayorsByTeam[winTeam] ?? [])) {
+      await run(db,
+        `INSERT INTO ctf_player_scores (userId, points, reason, locationId, awardedAt)
+         VALUES (?, 2, 'domination_contribution', NULL, ?)`,
+        [uid, now]
+      );
+    }
     broadcast({ type: 'ctf_update' });
   }
 }
@@ -267,7 +305,7 @@ router.get('/api/ctf/leaderboard/players', async (_req, res) => {
        FROM users u
        LEFT JOIN ctf_player_scores cps ON cps.userId = u.id
        GROUP BY u.id, u.username, u.teamId
-       HAVING COALESCE(SUM(cps.points), 0) > 0
+       HAVING COALESCE(SUM(cps.points), 0) <> 0
        ORDER BY ctfScore DESC
        LIMIT 50`,
       []
@@ -300,20 +338,17 @@ router.get('/api/ctf/teams/composition', async (_req, res) => {
 
 // ── Scoring cron ──────────────────────────────────────────────────────────────
 
+// Cron — appelé toutes les 60 secondes
 export function startCtfCron(broadcast) {
   setInterval(async () => {
     try {
       const db = await getDb();
       const { hour } = getZurichDateHour();
 
-      await runHourlyScoring(db, broadcast);
-
-      if (hour === 12) {
-        await runBonusScoring(db, broadcast, 'bonus_12h');
-      }
-      if (hour === 14) {
-        await runBonusScoring(db, broadcast, 'bonus_14h');
-      }
+      await runHourlyScoring(db, broadcast);   // per-mayor, continu
+      await runDominationBonus(db, broadcast); // snapshot global, 1x/heure
+      if (hour === 12) await runBonusScoring(db, broadcast, 'bonus_12h');
+      if (hour === 14) await runBonusScoring(db, broadcast, 'bonus_14h');
     } catch (err) {
       console.error('[ctf-cron] Error:', err.message);
     }

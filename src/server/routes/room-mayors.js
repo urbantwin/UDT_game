@@ -450,6 +450,11 @@ export default function createRoomMayorsRouter({ broadcast }) {
         }
 
         await updateScore(db, report.mayorUserId, -10);
+        await run(db,
+          `INSERT INTO ctf_player_scores (userId, points, reason, locationId, awardedAt)
+           VALUES (?, -10, 'admin_report_penalty', ?, ?)`,
+          [report.mayorUserId, report.locationId, Date.now()]
+        );
 
         await run(db,
           'INSERT INTO notifications (userId, type, message, read, createdAt) VALUES (?, ?, ?, 0, ?)',

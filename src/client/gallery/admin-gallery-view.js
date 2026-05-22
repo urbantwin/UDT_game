@@ -13,22 +13,21 @@ const BUCKETS = [
 export function createAdminGalleryView({ container = document.body, map = null, onOverridesSaved } = {}) {
   const root = document.createElement('div');
   root.style.cssText = `
-    position:fixed; right:16px; top:130px; z-index:1300;
-    display:none; flex-direction:column; align-items:flex-end; gap:8px;
+    position:fixed; right:0; top:0; bottom:0; z-index:1300;
+    display:none; flex-direction:column; align-items:flex-end;
+    pointer-events:none;
   `;
 
-  // Le panneau est déclenché depuis la barre de navigation (pas de bouton texte ici)
+  // Le panneau est declenche depuis la barre de navigation (pas de bouton texte ici)
 
-  // ── Panel ────────────────────────────────────────────────────────────────
   const panel = document.createElement('div');
   panel.style.cssText = `
-    display:none; background:rgba(0,0,0,0.88); color:#fff;
-    border-radius:10px; width:420px;
-    box-shadow:0 6px 16px rgba(0,0,0,0.4); flex-direction:column;
-    max-height:calc(100vh - 120px);
+    display:none; background:rgba(0,0,0,0.92); color:#fff;
+    border-radius:12px 0 0 12px; width:min(420px, 92vw);
+    box-shadow:-6px 0 16px rgba(0,0,0,0.45); flex-direction:column;
+    height:100vh; pointer-events:all;
   `;
 
-  // ── Zone fixe : header + tabs (ne scroll pas) ───────────────────────────
   const fixedTop = document.createElement('div');
   fixedTop.style.cssText = `
     padding:10px 10px 6px; background:rgba(0,0,0,0.88);
@@ -39,21 +38,24 @@ export function createAdminGalleryView({ container = document.body, map = null, 
   const header = document.createElement('div');
   header.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
   const title = document.createElement('span');
-  title.textContent = 'Admin — 4 Buckets';
+  title.textContent = 'Admin - 4 Buckets';
   title.style.cssText = 'font-weight:600; font-size:13px;';
-  const refreshBtn = makeBtn('↻ Refresh', '#60a5fa');
+  const refreshBtn = makeBtn('Refresh', '#60a5fa');
+  const closeBtn = makeBtn('X', 'rgba(255,255,255,0.18)');
+  closeBtn.style.color = '#fff';
+  closeBtn.style.minWidth = '32px';
+  const headerActions = document.createElement('div');
+  headerActions.style.cssText = 'display:flex; align-items:center; gap:6px;';
+  headerActions.appendChild(refreshBtn);
+  headerActions.appendChild(closeBtn);
   header.appendChild(title);
-  header.appendChild(refreshBtn);
+  header.appendChild(headerActions);
   fixedTop.appendChild(header);
 
-  // Tabs
   const tabBar = document.createElement('div');
   tabBar.style.cssText = 'display:flex; gap:4px; flex-wrap:wrap;';
   fixedTop.appendChild(tabBar);
   panel.appendChild(fixedTop);
-
-  // ── Zone scrollable : liste des photos ───────────────────────────────────
-  // ~3 photos simples (~80px) ou ~3 tandems (~180px) visibles avant scroll
   const scrollArea = document.createElement('div');
   scrollArea.style.cssText = `
     overflow-y: scroll;
@@ -969,6 +971,10 @@ export function createAdminGalleryView({ container = document.body, map = null, 
     else if (activeView === 'reports') loadReportsView();
     else loadBucket(activeBucket);
   });
+  closeBtn.addEventListener('click', () => {
+    removeDragMarkers();
+    panel.style.display = 'none';
+  });
 
   // ── Public API ───────────────────────────────────────────────────────────
   function togglePanel() {
@@ -1038,3 +1044,4 @@ function formatFloor(floor) {
   const labels = { '-1': 'SS', 0: 'RDC', 1: 'N+1', 2: 'N+2', 3: 'N+3', 4: 'N+4' };
   return `🏢 ${labels[floor] ?? `Étage ${floor}`}`;
 }
+
