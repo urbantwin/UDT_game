@@ -25,6 +25,17 @@ export const mapConfig = {
     [46.525309, 6.575161],
   ],
   maxBoundsViscosity: 0.9,
+}
+
+  // Add this export — consumed when initialising the map so the
+// roomsLayer pane is created with the right z-index.
+
+export const paneConfig = {
+  
+  // Our floor overlay sits at z 300; rooms must be above it.
+  roomsLayerPane: 'roomsPane',
+  roomsLayerPaneZ: 400,       // above overlay (300), below tooltips (500+)
+
 };
 
 
