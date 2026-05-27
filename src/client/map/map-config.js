@@ -4,7 +4,7 @@
 
 
 const MAPTILER_API_KEY = 'gSTCLnxh29Q78GGjrOo9';
-const MAPTILER_TILE_URL = `https://api.maptiler.com/tiles/019e6879-f24c-70e1-b4bb-d7751e248a6a/{z}/{x}/{y}.png?key=${MAPTILER_API_KEY}`;
+const MAPTILER_TILE_URL = `https://api.maptiler.com/tiles/019e68ba-5b8d-7214-87c7-7bd37a682242/{z}/{x}/{y}.png?key=${MAPTILER_API_KEY}`;
 
 export const mapConfig = {
   center: { lat: 46.520444, lon: 6.567812 },
@@ -26,3 +26,6 @@ export const mapConfig = {
   ],
   maxBoundsViscosity: 0.9,
 };
+
+
+
