@@ -4,7 +4,7 @@
 
 const MAPTILER_API_KEY = 'gSTCLnxh29Q78GGjrOo9';
 
-export const OVERLAY_MIN_ZOOM = 19;
+export const OVERLAY_MIN_ZOOM = 18;
 
 // Add or change tile IDs here to swap sources per floor.
 export const floorOverlayTiles = {

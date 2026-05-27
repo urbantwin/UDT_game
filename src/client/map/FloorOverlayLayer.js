@@ -91,7 +91,6 @@ export class FloorOverlayLayer {
 
   _addLayer(floorKey) {
     const url = floorOverlayTiles[floorKey];
-    const zoom = this._map.getZoom();
 
     this._currentLayer = L.tileLayer(url, {
       ...floorOverlayOptions,
@@ -101,7 +100,8 @@ export class FloorOverlayLayer {
     // ✅ Wait until Leaflet has actually mounted the container
     this._currentLayer.once('add', () => {
       const container = this._currentLayer?.getContainer?.();
-      if (container && zoom < OVERLAY_MIN_ZOOM) {
+      const currentZoom = this._map.getZoom();
+      if (container && currentZoom < OVERLAY_MIN_ZOOM) {
         container.style.display = 'none';
       }
     });

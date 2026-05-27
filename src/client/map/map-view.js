@@ -91,35 +91,17 @@ export function createMapView({ containerId, config }) {
     if (label) label.textContent = `Étage ${floor}`;
   }
 
-  async function addOverlayLayers() {
-    try {
-      let layer1Data = null;
-      let l2Data = null;
+async function addOverlayLayers() {
+  try {
+    const l2Data = await loadShapefile('/data/rooms_subset.zip');
 
-      try {
-        [layer1Data, l2Data] = await Promise.all([
-          loadShapefile('/data/buildings.zip'),
-          loadShapefile('/data/rooms_subset.zip')
-        ]);
-      } catch {
-        // buildings might not load — try rooms alone
-        l2Data = await loadShapefile('/data/rooms_subset.zip');
-      }
+    layer2Data = l2Data;
 
-      let buildingsLayer = null;
-      if (layer1Data) {
-        buildingsLayer = L.geoJSON(layer1Data, {
-        style: { color: '#8f8f8f', weight: 2, fillOpacity: 0.8 }
-        }).addTo(map);
-      }
-
-      layer2Data = l2Data;
-
-      floors = [...new Set(
-        layer2Data.features
-          .map(f => f.properties.floor)
-          .filter(f => f != null)
-      )].sort((a, b) => a - b);
+    floors = [...new Set(
+      layer2Data.features
+        .map(f => f.properties.floor)
+        .filter(f => f != null)
+    )].sort((a, b) => a - b);
 
       if (floors.length === 0) return;
       currentFloor = floors.includes(1) ? 1 : floors[0];
