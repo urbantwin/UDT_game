@@ -64,7 +64,7 @@ export class FloorOverlayLayer {
     // Leaflet silently ignores duplicate createPane calls, but guard anyway.
     if (!this._map.getPane(OVERLAY_PANE)) {
       const pane = this._map.createPane(OVERLAY_PANE);
-      pane.style.zIndex = OVERLAY_PANE_Z;
+      pane.style.zIndex = String(OVERLAY_PANE_Z);
       // Prevent the pane from swallowing pointer events meant for rooms.
       pane.style.pointerEvents = 'none';
     }
@@ -98,13 +98,15 @@ export class FloorOverlayLayer {
       pane: OVERLAY_PANE,
     });
 
-    this._currentLayer.addTo(this._map);
+    // ✅ Wait until Leaflet has actually mounted the container
+    this._currentLayer.once('add', () => {
+      const container = this._currentLayer?.getContainer?.();
+      if (container && zoom < OVERLAY_MIN_ZOOM) {
+        container.style.display = 'none';
+      }
+    });
 
-    // Immediately honour the zoom threshold without waiting for a zoomend.
-    const container = this._currentLayer.getContainer?.();
-    if (container && zoom < OVERLAY_MIN_ZOOM) {
-      container.style.display = 'none';
-    }
+    this._currentLayer.addTo(this._map);
   }
 
   _removeCurrentLayer() {

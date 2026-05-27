@@ -27,6 +27,7 @@ export function createMapView({ containerId, config }) {
   });
 
   L.tileLayer(config.tileUrl, {
+    ...config.tileOptions,
     attribution: config.attribution,
     maxZoom: config.maxZoom
   }).addTo(map);
